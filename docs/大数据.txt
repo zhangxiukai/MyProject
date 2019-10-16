@@ -1,0 +1,271 @@
+大数据面试题
+
+1.jvm 内存模型与gc 内存回收机制
+JVM内存模型
+1、栈
+Java栈是与每一个线程关联的，JVM在创建每一个线程的时候，会分配一定的栈空间给线程。存储局部变量、引用、方法、返回值等。
+StackOverflowError：如果在线程执行的过程中，栈空间不够用，那么JVM就会抛出此异常，这种情况一般是死递归造成的。
+2、堆
+Java中堆是由所有的线程共享的一块内存区域，堆用来保存各种JAVA对象，比如数组，线程对象等。
+分代垃圾回收
+不同的对象生命周期不同。与业务信息有关的对象生命周期较长，如Http请求中的session对象、线程、socket连接。程序运行过程中的临时变量生命周期较短，如String对象。
+把不同生命周期的对象放在不同代上，不同代上采用最合适它的垃圾回收方式进行回收。JVM中共划分为三个代：年轻代、年老代和持久代，其中持久代主要存放Java类的类信息，与垃圾收集要收集的Java对象关系不大，年轻代和年老代的划分是对垃圾收集影响较大的。
+年轻代：存放所有新生成的对象；
+年老代：在年轻代中经历了N次垃圾回收仍然存活的对象，将被放到年老代中，故都是一些生命周期较长的对象；
+持久代：用于存放静态文件，如Java类、方法等。（持久代对垃圾回收没有显著影响，但是有些应用可能动态生成或者调用一些class，例如Hibernate等，在这种时候需要设置一个比较大的持久代空间来存放这些运行过程中新增的类。）
+
+2.String和StringBuffer的区别
+
+JAVA平台提供了两个类：String和StringBuffer，它们可以储存和操作字符串，即包含多个字符的字符数据。这个String类提供了数值不可改变的字符串。而这个StringBuffer类提供的字符串进行修改。当你知道字符数据要改变的时候你就可以使用StringBuffer。典型地，你可以使用StringBuffers来动态构造字符数据。另外，String实现了equals方法，new String(“abc”).equals(newString(“abc”)的结果为true,而StringBuffer没有实现equals方法，所以，new StringBuffer(“abc”).equals(newStringBuffer(“abc”)的结果为false。
+接着要举一个具体的例子来说明，我们要把1到100的所有数字拼起来，组成一个串。
+StringBuffer sbf = new StringBuffer();
+for(int i=0;i<100;i++)
+{
+sbf.append(i);
+}
+上面的代码效率很高，因为只创建了一个StringBuffer对象，而下面的代码效率很低，因为创建了101个对象。
+String str = new String();
+for(int i=0;i<100;i++)
+{
+str = str + i;
+}
+在讲两者区别时，应把循环的次数搞成10000，然后用endTime-beginTime来比较两者执行的时间差异，最后还要讲讲StringBuilder与StringBuffer的区别。
+String覆盖了equals方法和hashCode方法，而StringBuffer没有覆盖equals方法和hashCode方法，所以，将StringBuffer对象存储进Java集合类中时会出现问题。
+3.运行时异常与一般异常有何异同？
+异常表示程序运行过程中可能出现的非正常状态，运行时异常表示虚拟机的通常操作中可能遇到的异常，是一种常见运行错误。java编译器要求方法必须声明抛出可能发生的非运行时异常，但是并不要求必须声明抛出未被捕获的运行时异常。
+4.请写出你最常见到的5个runtime exception。
+
+这道题主要考你的代码量到底多大，如果你长期写代码的，应该经常都看到过一些系统方面的异常，你不一定真要回答出5个具体的系统异常，但你要能够说出什么是系统异常，以及几个系统异常就可以了，当然，这些异常完全用其英文名称来写是最好的，如果实在写不出，那就用中文吧，有总比没有强！
+
+所谓系统异常，就是…..，它们都是RuntimeException的子类，在jdk doc中查RuntimeException类，就可以看到其所有的子类列表，也就是看到了所有的系统异常。我比较有印象的系统异常有：NullPointerException、ArrayIndexOutOfBoundsException、ClassCastException。
+5.同步和异步有何异同，在什么情况下分别使用他们？举例说明。
+
+如果数据将在线程间共享。例如正在写的数据以后可能被另一个线程读到，或者正在读的数据可能已经被另一个线程写过了，那么这些数据就是共享数据，必须进行同步存取。
+
+当应用程序在对象上调用了一个需要花费很长时间来执行的方法，并且不希望让程序等待方法的返回时，就应该使用异步编程，在很多情况下采用异步途径往往更有效率。
+6.多线程有几种实现方法?同步有几种实现方法?
+
+多线程有两种实现方法，分别是继承Thread类与实现Runnable接口
+同步的实现方面有两种，分别是synchronized,wait与notify
+wait():使一个线程处于等待状态，并且释放所持有的对象的lock。
+sleep():使一个正在运行的线程处于睡眠状态，是一个静态方法，调用此方法要捕捉InterruptedException异常。
+notify():唤醒一个处于等待状态的线程，注意的是在调用此方法的时候，并不能确切的唤醒某一个等待状态的线程，而是由JVM确定唤醒哪个线程，而且不是按优先级。
+Allnotity():唤醒所有处入等待状态的线程，注意并不是给所有唤醒线程一个对象的锁，而是让它们竞争。
+7.构造器（constructor）是否可被重写（override）
+答：构造器不能被继承，因此不能被重写，但可以被重载。
+8.当一个对象被当作参数传递到一个方法后，此方法可改变这个对象的属性，并可返回变化后的结果，那么这里到底是值传递还是引用传递？ 
+答：是值传递。Java语言的方法调用只支持参数的值传递。当一个对象实例作为一个参数被传递到方法中时，参数的值就是对该对象的引用。对象的属性可以在被调用过程中被改变，但对对象引用的改变是不会影响到调用者的。C++和C#中可以通过传引用或传输出参数来改变传入的参数的值。在C#中可以编写如下所示的代码，但是在Java中却做不到。
+说明：Java中没有传引用实在是非常的不方便，这一点在Java 8中仍然没有得到改进，正是如此在Java编写的代码中才会出现大量的Wrapper类（将需要通过方法调用修改的引用置于一个Wrapper类中，再将Wrapper对象传入方法），这样的做法只会让代码变得臃肿，尤其是让从C和C++转型为Java程序员的开发者无法容忍。
+9.抽象类（abstract class）和接口（interface）有什么异同？ 
+答：抽象类和接口都不能够实例化，但可以定义抽象类和接口类型的引用。一个类如果继承了某个抽象类或者实现了某个接口都需要对其中的抽象方法全部进行实现，否则该类仍然需要被声明为抽象类。接口比抽象类更加抽象，因为抽象类中可以定义构造器，可以有抽象方法和具体方法，而接口中不能定义构造器而且其中的方法全部都是抽象方法。抽象类中的成员可以是private、默认、protected、public的，而接口中的成员全都是public的。抽象类中可以定义成员变量，而接口中定义的成员变量实际上都是常量。有抽象方法的类必须被声明为抽象类，而抽象类未必要有抽象方法。
+10.阐述静态变量和实例变量的区别。 
+答：静态变量是被static修饰符修饰的变量，也称为类变量，它属于类，不属于类的任何一个对象，一个类不管创建多少个对象，静态变量在内存中有且仅有一个拷贝；实例变量必须依存于某一实例，需要先创建对象然后通过对象才能访问到它。静态变量可以实现让多个对象共享内存。补充：在Java开发中，上下文类Context和工具类Util中通常会有大量的静态成员。
+11.在使用hadoop 或者是spark 中遇到过哪些问题，是如何处理解决的。
+数据倾斜。
+出现这种情况：多数是由于代码的质量写的不够健壮。查看日志：发现问题。
+spark-出现OOM
+小数据量的情况可以cache，数据量大的情况必须考虑内存使用。
+12.hdfs 和hbase 各自使用场景。
+整理总结：
+首先一点需要明白：Hbase 是基于HDFS 来存储的。
+HDFS：
+1、一次性写入，多次读取。
+2、保证数据的一致性。
+3、主要是可以部署在许多廉价机器中，通过多副本提高可靠性，提供了容错和恢复机制。
+Hbase：
+1、瞬间写入量很大，数据库不好支撑或需要很高成本支撑的场景。
+2、数据需要长久保存，且量会持久增长到比较大的场景
+3、hbase 不适用与有join，多级索引，表关系复杂的数据模型
+13. hadoop 中两个大表实现join 的操作，简单描述。
+这个简单了。
+10.1 map 读取两个表，分别标示一下，然后context 输出。reduce 做笛卡尔积。
+10.2 map 之前setup 时先DistributeCache，然后map 阶段扫描大表。
+14. 如果 NameNode 意外终止，SecondaryNameNode 会接替它使集群继续工作。（错误 ）
+分析：
+SecondaryNameNode 是帮助恢复，而不是替代，如何恢复，可以查看
+15.简要描述如何安装配置一个apahce开源版hadoop
+
+安装java，并修改/etc/profile文件，配置java的环境变量。
+修改Host文件域名。
+安装SSH，配置无密钥通信。
+解压hadoop。
+配置conf文件下hadoop-env.sh、core-site.sh、mapre-site.sh、hdfs-site.sh。
+配置hadoop的环境变量。
+Hadoop namenode -format
+Start-all.sh
+16.列出Hadoop急群众hadoop都分别需要启动哪些进程，他们的作用是什么。
+
+namenode：管理集群，并记录datanode文件信息。
+Secondname:可以做冷备，对一定范围内数据做快照性备份。
+Datanode:存储数据
+Jobtracker :管理任务，并将任务分配给tasktracker。
+Tasktracker:任务执行方。
+
+17.请列出你知道的hadoop调度器，并简要说明工作方法。
+
+Fifo schedular :默认，先进先出的原则
+Capacity schedular :计算能力调度器，选择占用最小、优先级高的先执行，依此类推。
+Fair schedular: 公平调度，所有的job具有相同的资源。
+18.Hive有哪些方式保存元数据的，各有哪些特点。
+三种：内存数据库derby，挺小，不常用。
+本地mysql。。常用
+远程端mysql。。不常用
+19.请简述hadoop怎样实现二级排序
+第一种方法是，Reducer将给定key的所有值都缓存起来，然后对它们再做一个Reducer内排序。但是，由于Reducer需要保存给定key的所有值，可能会导致出现内存耗尽的错误。
+第二种方法是，将值的一部分或整个值加入原始key，生成一个合成key。这两种方法各有优势，第一种方法可能会更快一些(但有内存耗尽的危险)，第二种方法则是将排序的任务交给MapReduce框架，更符合Hadoop/Reduce的设计思想。这篇文章里选择的是第二种。我们将编写一个Partitioner，确保拥有相同key(原始key，不包括添加的部分)的所有数据被发往同一个Reducer，还将编写一个Comparator，以便数据到达Reducer后即按原始key分组。
+
+20.简述hadoop实现join的几种方法
+1、在Reudce端进行连接。
+在Reudce端进行连接是MapReduce框架进行表之间join操作最为常见的模式，其具体的实现原理如下：
+Map端的主要工作：为来自不同表（文件）的key/value对打标签以区别不同来源的记录。然后用连接字段作为key，其余部分和新加的标志作为value，最后进行输出。
+reduce端的主要工作：在reduce端以连接字段作为key的分组已经完成，我们只需要在每一个分组当中将那些来源于不同文件的记录（在map阶段已经打标志）分开，最后进行笛卡尔只就ok了。
+	2、在Map端进行连接。
+使用场景：一张表十分小、一张表很大。
+用法:在提交作业的时候先将小表文件放到该作业的DistributedCache中，然后从DistributeCache中取出该小表进行join key / value解释分割放到内存中（可以放大Hash Map等等容器中）。然后扫描大表，看大表中的每条记录的join key /value值是否能够在内存中找到相同join key的记录，如果有则直接输出结果。
+21．请简述MapReduce中的combiner，partition作用
+1.combine
+combine分为map端和reduce端，作用是把同一个key的键值对合并在一起，可以自定义的。combine函数把一个map函数产生的<key,value>对（多个key,value）合并成一个新的<key2,value2>.将新的<key2,value2>作为输入到reduce函数中
+这个value2亦可称之为values，因为有多个。这个合并的目的是为了减少网络传输。
+2.partition
+partition是分割map每个节点的结果，按照key分别映射给不同的reduce，也是可以自定义的。这里其实可以理解归类。
+我们对于错综复杂的数据归类。比如在动物园里有牛羊鸡鸭鹅，他们都是混在一起的，但是到了晚上他们就各自牛回牛棚，羊回羊圈，鸡回鸡窝。partition的作用就是把这些数据归类。只不过在写程序的时候，mapreduce使用哈希HashPartitioner帮我们归类了。这个我们也可以自定义。
+22. 用mapreduce怎么处理数据倾斜问题？
+	Mapreduce过程有可能某一个key的条数比其他key多很多（有时是百倍或者千倍之多），这条key所在的reduce节点所处理的数据量比其他节点就大很多，从而导致某几个节点迟迟运行不完，此称之为数据倾斜
+(1)设置一个hash份数N，用来对条数众多的key进行打散。
+(2)对有多条重复key的那份数据进行处理：从1到N将数字加在key后面作为新key，如果需要和另一份数据关联的话，则要重写比较类和分发类，如此实现多条key的平均分发。
+（3）上一步之后，key被平均分散到很多不同的reduce节点。如果需要和其他数据关联，为了保证每个reduce节点上都有关联的key，对另一份单一key的数据进行处理：循环的从1到N将数字加在key后面作为新key
+23. mapreduce的原理?
+Hadoop 中的MapReduce 是一个使用简易的软件框架，基于它写出来的应用程序能够运行在由上千个商用
+机器组成的大型集群上，并以一种可靠容错的式并 行处理上T 级别的数据集。
+一个MapReduce 作业（job）通常会把输入的数据集切分为若干独立的数据块，由map 任务（task）以完
+全并行的方式处理它们。框架会对map 的输出先进行排序，然后把结果输入给reduce 任务。通常作业的
+输入和输出都会被存储在文件系统中。整个框架负责任务的调度和监控，以及重新执行已经失败的任务。
+通常，MapReduce 框架和分布式文件系统是运行在一组相同的节点上的，也就是说，计算节点和存储节点
+通常在一起。这种配置允许框架在那些已经存好数据的节点上高效地调度任务，这可以使整个集群的网络
+带宽被非常高效地利用。
+MapReduce 框架由一个单独的master JobTracker 和每个集群节点一个slave TaskTracker 共同组成。master
+负责调度构成一个作业的所有任务，这些任务分布在不同的slave 上，master 监控它们的执行，重新执行
+已经失败的任务。而slave 仅负责执行由master 指派的任务
+24. HDFS存储的机制?
+HDFS 的三个实体
+数据块
+每个磁盘都有默认的数据块大小,这是磁盘进行读写的基本单位.构建于单个磁盘之上的文件系统通过磁盘
+块来管理该文件系统中的块.该文件系统中的块一般为磁盘块的整数倍.磁盘块一般为512 字节.HDFS 也有
+块的概念,默认为64MB(一个map 处理的数据大小).HDFS 上的文件也被划分为块大小的多个分块,与其他文
+件系统不同的是,HDFS 中小于一个块大小的文件不会占据整个块的空间.
+HDFS 用块存储带来的第一个明显的好处一个文件的大小可以大于网络中任意一个磁盘的容量,数据块可以
+利用磁盘中任意一个磁盘进行存储.第二个简化了系统的设计,将控制单元设置为块,可简化存储管理,计算
+单个磁盘能存储多少块就相对容易.同时也消除了对元数据的顾虑,如权限信息,可以由其他系统单独管理.
+DataNode 节点
+DataNode 是HDFS 文件系统的工作节点,它们根据需要存储并检索数据块,受NameNode 节点调度.并且定
+期向NameNode 发送它们所存储的块的列表
+NameNode 节点
+NameNode 管理HDFS 文件系统的命名空间,它维护着文件系统树及整棵树的所有的文件及目录.这些文件
+以两个文件形式永久保存在本地磁盘上(命名空间镜像文件和编辑日志文件).NameNode 记录着每个文件中
+各个块所在的数据节点信息但并不永久保存这些块的位置信息,因为这些信息在系统启动时由数据节点重
+建.
+没有NameNode,文件系统将无法使用.如提供NameNode 服务的机器损坏,文件系统上的所有文件丢失,我
+们就不能根据DataNode 的块来重建文件.因此,对NameNode 的容错非常重要.第一种机制,备份那些组成文
+件系统元数据持久状态的文件.通过配置使NameNode 在多个文件系统上保存元数据的持久状态或将数据
+写入本地磁盘的同时,写入一个远程挂载的网络文件系统.当然这些操作都是原子操作.第二种机制是运行一
+个辅助的NameNode,它会保存合并后的命名空间镜像的副本,并在Name/Node 发生故障时启用.但是辅助
+NameNode 保存.态总是滞后于主力节点,所以在主节点全部失效后难免丢失数据.在这种情况下,一般把存
+储在远程挂载的网络文件系统的数据复制到辅助NameNode 并作为新的主NameNode 运行
+25. hadoop中Combiner的作用
+combiner也是一个reduce，它可以削减map到reudce的数据传输，进步shuff速度。牢记平均值不要用。需求输入=map的输出，输出=reduce的输入。
+26. Hbase中的META和ROOT用来做什么的？
+ROOT-
+表包含.META.表所在的region列表，该表只会有一个Region；
+Zookeeper中记录了-ROOT-表的location。
+META.
+表包含所有的用户空间region列表，以及RegionServer的服务器地址。
+
+27. zookeeper优点，用在什么场合
+Zookeeper 作为一个分布式的服务框架，主要用来解决分布式集群中应用系统的一致性问题，它能提供基于类似于文件系统的目录节点树方式的数据存储，但是 Zookeeper 并不是用来专门存储数据的，它的作用主要是用来维护和监控你存储的数据的状态变化。通过监控这些数据状态的变化，从而可以达到基于数据的集群管理
+
+统一命名服务（Name Service）
+分布式应用中，通常需要有一套完整的命名规则，既能够产生唯一的名称又便于人识别和记住，通常情况下用树形的名称结构是一个理想的选择，树形 的名称结构是一个有层次的目录结构，既对人友好又不会重复。说到这里你可能想到了 JNDI，没错 Zookeeper 的 Name Service 与 JNDI 能够完成的功能是差不多的，它们都是将有层次的目录结构关联到一定资源上，但是 Zookeeper 的 Name Service 更加是广泛意义上的关联，也许你并不需要将名称关联到特定资源上，你可能只需要一个不会重复名称，就像数据库中产生一个唯一的数字主键一样。
+Name Service 已经是 Zookeeper 内置的功能，你只要调用 Zookeeper 的 API 就能实现。如调用 create 接口就可以很容易创建一个目录节点。
+配置管理（Configuration Management）
+配置的管理在分布式应用环境中很常见，例如同一个应用系统需要多台 PC Server 运行，但是它们运行的应用系统的某些配置项是相同的，如果要修改这些相同的配置项，那么就必须同时修改每台运行这个应用系统的 PC Server，这样非常麻烦而且容易出错。
+像这样的配置信息完全可以交给 Zookeeper 来管理，将配置信息保存在 Zookeeper 的某个目录节点中，然后将所有需要修改的应用机器监控配置信息的状态，一旦配置信息发生变化，每台应用机器就会收到 Zookeeper 的通知，然后从 Zookeeper 获取新的配置信息应用到系统中。
+集群管理（Group Membership）
+Zookeeper 能够很容易的实现集群管理的功能，如有多台 Server 组成一个服务集群，那么必须要一个“总管”知道当前集群中每台机器的服务状态，一旦有机器不能提供服务，集群中其它集群必须知道，从而做出调整重新分配服 务策略。同样当增加集群的服务能力时，就会增加一台或多台 Server，同样也必须让“总管”知道。
+Zookeeper 不仅能够帮你维护当前的集群中机器的服务状态，而且能够帮你选出一个“总管”，让这个总管来管理集群，这就是 Zookeeper 的另一个功能 Leader Election。
+它们的实现方式都是在 Zookeeper 上创建一个 EPHEMERAL 类型的目录节点，然后每个 Server 在它们创建目录节点的父目录节点上调用 getChildren (String  path, boolean watch) 方法并设置 watch 为 true，由于是 EPHEMERAL 目录节点，当创建它的 Server 死去，这个目录节点也随之被删除，所以 Children 将会变化，这时getChildren 上的 Watch 将会被调用，所以其它 Server 就知道已经有某台 Server 死去了。新增 Server 也是同样的原理。
+Zookeeper 如何实现 Leader Election，也就是选出一个 Master Server。和前面的一样每台 Server 创建一个 EPHEMERAL 目录节点，不同的是它还是一个 SEQUENTIAL 目录节点，所以它是个 EPHEMERAL_SEQUENTIAL 目录节点。之所以它是 EPHEMERAL_SEQUENTIAL 目录节点，是因为我们可以给每台 Server 编号，我们可以选择当前是最小编号的 Server 为 Master，假如这个最小编号的 Server 死去，由于是 EPHEMERAL 节点，死去的 Server 对应的节点也被删除，所以当前的节点列表中又出现一个最小编号的节点，我们就选择这个节点为当前 Master。这样就实现了动态选择 Master，避免了传统意义上单 Master 容易出现单点故障的问题。
+
+28.你在项目中遇到了哪些难题，是怎么解
+某些任务执行时间过长，且失败率过高，检查日志后发现没有执行完就失败，原因出在hadoop的job的timeout过短（相对于集群的能力来说），设置长一点即可
+29. hive 跟hbase 的区别是？
+1. 两者分别是什么？  
+ Apache Hive是一个构建在Hadoop基础设施之上的数据仓库。通过Hive可以使用HQL语言查询存放在HDFS上的数据。HQL是一种类SQL语言，这种语言最终被转化为Map/Reduce. 虽然Hive提供了SQL查询功能，但是Hive不能够进行交互查询--因为它只能够在Haoop上批量的执行Hadoop。
+    Apache HBase是一种Key/Value系统，它运行在HDFS之上。和Hive不一样，Hbase的能够在它的数据库上实时运行，而不是运行MapReduce任务。Hive被分区为表格，表格又被进一步分割为列簇。列簇必须使用schema定义，列簇将某一类型列集合起来（列不要求schema定义）。例如，“message”列簇可能包含：“to”, ”from” “date”, “subject”, 和”body”. 每一个 key/value对在Hbase中被定义为一个cell，每一个key由row-key，列簇、列和时间戳。在Hbase中，行是key/value映射的集合，这个映射通过row-key来唯一标识。Hbase利用Hadoop的基础设施，可以利用通用的设备进行水平的扩展。
+2. 两者的特点
+  Hive帮助熟悉SQL的人运行MapReduce任务。因为它是JDBC兼容的，同时，它也能够和现存的SQL工具整合在一起。运行Hive查询会花费很长时间，因为它会默认遍历表中所有的数据。虽然有这样的缺点，一次遍历的数据量可以通过Hive的分区机制来控制。分区允许在数据集上运行过滤查询，这些数据集存储在不同的文件夹内，查询的时候只遍历指定文件夹（分区）中的数据。这种机制可以用来，例如，只处理在某一个时间范围内的文件，只要这些文件名中包括了时间格式。
+    HBase通过存储key/value来工作。它支持四种主要的操作：增加或者更新行，查看一个范围内的cell，获取指定的行，删除指定的行、列或者是列的版本。版本信息用来获取历史数据（每一行的历史数据可以被删除，然后通过Hbase compactions就可以释放出空间）。虽然HBase包括表格，但是schema仅仅被表格和列簇所要求，列不需要schema。Hbase的表格包括增加/计数功能。
+3. 限制
+  Hive目前不支持更新操作。另外，由于hive在hadoop上运行批量操作，它需要花费很长的时间，通常是几分钟到几个小时才可以获取到查询的结果。Hive必须提供预先定义好的schema将文件和目录映射到列，并且Hive与ACID不兼容。
+    HBase查询是通过特定的语言来编写的，这种语言需要重新学习。类SQL的功能可以通过Apache Phonenix实现，但这是以必须提供schema为代价的。另外，Hbase也并不是兼容所有的ACID特性，虽然它支持某些特性。最后但不是最重要的--为了运行Hbase，Zookeeper是必须的，zookeeper是一个用来进行分布式协调的服务，这些服务包括配置服务，维护元信息和命名空间服务。
+4. 应用场景
+    Hive适合用来对一段时间内的数据进行分析查询，例如，用来计算趋势或者网站的日志。Hive不应该用来进行实时的查询。因为它需要很长时间才可以返回结果。
+    Hbase非常适合用来进行大数据的实时查询。Facebook用Hbase进行消息和实时的分析。它也可以用来统计Facebook的连接数。
+5. 总结
+    Hive和Hbase是两种基于Hadoop的不同技术--Hive是一种类SQL的引擎，并且运行MapReduce任务，Hbase是一种在Hadoop之上的NoSQL 的Key/vale数据库。当然，这两种工具是可以同时使用的。就像用Google来搜索，用FaceBook进行社交一样，Hive可以用来进行统计查询，HBase可以用来进行实时查询，数据也可以从Hive写到Hbase，设置再从Hbase写回Hive。
+
+30.Spark的RDD操作有哪两类，有什么区别，分别举出些例子来
+一种是转化操作（transformation）
+一种是行为操作（action）
+转化操作是返回一个新的RDD的操作，如filter（），map（）
+行为操作是返回结果或者将结果写入外部系统的操作，如count（），first（）
+31.谈一下数据倾斜如何产生的，并给出优化方案
+数据倾斜是当我们在进行map操作的时候，比如进行了过滤之后，某些key的value会留下的有效值非常多，而同一个key的数据在进行reduce操作的时候会被发送到某一个节点上去执行从而导致该节点上的reduce处理的数据量很大，从而形成数据倾斜。
+处理的方案是
+32.hdfs中block默认保存几份
+默认的是保存3份副本，这个副本数是在配置文件hdfs-site.xml中可以设置dfs.replication参数而自定义。
+33.hive跟hbase的区别是什么
+34.flume-ng的工作原理
+Flume NG是Cloudera提供的一个分布式、可靠、可用的系统，它能够将不同数据源的海量日志数据进行高效收集、聚合、移动，最后存储到一个中心化数据存储系统中。
+Flume的架构主要有一下几个核心概念：
+Event：一个数据单元，带有一个可选的消息头
+Flow：Event从源点到达目的点的迁移的抽象
+Client：操作位于源点处的Event，将其发送到Flume Agent
+Agent：一个独立的Flume进程，包含组件Source、Channel、Sink
+Source：用来消费传递到该组件的Event
+Channel：中转Event的一个临时存储，保存有Source组件传递过来的Event
+Sink：从Channel中读取并移除Event，将Event传递到Flow Pipeline中的下一个Agent（如果有的话）
+
+35.kafka的工作原理
+Kafka是一个信息收集平台，它的特性是高吞吐量，它对信息的收集和消费都是被动的，生产者讲消息发送到broker，消费者从broker中获取并消费消息。在kafka中通过建立Topic来接收保存同一类型的消息，topic是可以分区的，每个分区保存在不同的broker上面，并且可以实现消息的发布/订阅机制。
+36．Spark Streaming的工作原理
+Spark Streaming 是基于spark的流式批处理引擎，其基本原理是把输入数据以某一时间间隔批量的处理，当批处理间隔缩短到秒级时，便可以用于处理实时数据流。
+具体流程：
+1.客户端提交作业后启动Driver，Driver是spark作业的Master。
+2.每个作业包含多个Executor，每个Executor以线程的方式运行task，Spark Streaming至少包含一个receiver task。
+3.Receiver接收数据后生成Block，并把BlockId汇报给Driver，然后备份到另外一个Executor上。
+4.ReceiverTracker维护Reciver汇报的BlockId。
+5.Driver定时启动JobGenerator，根据Dstream的关系生成逻辑RDD，然后创建Jobset，交给JobScheduler。
+6.JobScheduler负责调度Jobset，交给DAGScheduler，DAGScheduler根据逻辑RDD，生成相应的Stages，每个stage包含一到多个task。
+7.TaskScheduler负责把task调度到Executor上，并维护task的运行状态。
+8.当tasks，stages，jobset完成后，单个batch才算完成。
+
+37.flume如何和sparkStreaming结合使用
+  Flume通过配置sink将event以avro的方式发送到sparkStreaming运行的端口，sparkStreaming接收到数据以后在对DStream的操作过程中将数据反序列化并解析。
+38. Phoenix的作用和用处
+  Phoenix为hbase提供了一种sql的查询语法，它把对hbase的操作封装成jdbc的方式，让我们可以通过java代码或者phoenix客户端上使用sql来操作hbase
+39.sqoop的基本原理和使用方法
+Sqoop是一个数据传递的工具，主要用于在Hadoop(Hive)与传统的数据库(mysql、postgresql...)间进行数据的传递，可以将一个关系型数据库（例如 ： MySQL ,Oracle ,Postgres等）中的数据导进到Hadoop的HDFS中，也可以将HDFS的数据导进到关系型数据库中。
+40.lucene的工作原理
+Lucene是一个高性能的java全文检索工具包，它使用的是倒排文件索引结构的方式来对数据进行建立索引从而实现对文档的快速检索功能。
+41.hive数据内部表和外部表的区别
+1、在导入数据到外部表，数据并没有移动到自己的数据仓库目录下，也就是说外部表中的数据并不是由它自己来管理的！而表则不一样；
+2、在删除表的时候，Hive将会把属于表的元数据和数据全部删掉；而删除外部表的时候，Hive仅仅删除外部表的元数据，数据是不会删除的！
+42.工作中的etl过程都是使用什么来完成的
+	工作etl过程一般是使用sql语句在加上一门脚本语言来进行实现，sql语句提供很强大的数据操作的功能，但是也有不足的地方，比方说参数的设置和处理，逻辑判断等，因此一般的etl过程都会讲sql嵌在一种脚本语言里，通过对脚本的运行来完成对输出的抽取和转换工作。
+43.kafka和flume-ng的集成方式和原因。
+1．Kafka可以作为消息的收集者，flume-ng的source作为kafka的消息消费者，这种集成方式，是当收集的信息需要存放入hdfs中时flume可以作为一种与hdfs交互方便的桥梁，只需配置sink就可以把数据轻松的存入hdfs或者hbase中
+2.flume-ng作为消息的采集端，把采集到的消息通过sink发送到kafka，作为kafka的生产者，kafka作为一种高吞吐量的消息收集工具，可以作为flume-ng采集到的信息的一种缓存，然后在将消息存放入目标存储系统，这种情况一般适用于信息的采集和消费速度不一致时，使用kafka作为一种缓存机制的解决方案。
+44.spark使用zookeeper配置高可用的原理。
+  原理是spark的master节点的运行状态数据和备master节点的信息保存在zookeeper集群的服务器上，当主master节点宕机以后zookeeper会讲原主master节点的状态数据恢复到备master节点上，同时备master节点的状态变成主master节点并开始执行主master节点的工作任务。
+45.yarn和mapreduce的区别
+YARN并不是下一代MapReduce（MRv2），下一代MapReduce与第一代MapReduce（MRv1）在编程接口、数据处理引擎（MapTask和ReduceTask）是完全一样的，  可认为MRv2重用了MRv1的这些模块，不同的是资源管理和作业管理系统，MRv1中资源管理和作业管理均是由JobTracker实现的，集两个功能于一身，而在MRv2中，将这两部分分开了，  其中，作业管理由ApplicationMaster实现，而资源管理由新增系统YARN完成，由于YARN具有通用性，因此YARN也可以作为其他计算框架的资源管理系统，不仅限于MapReduce，也是其他计算框架，比如Spark、Storm等，  通常而言，我们一般将运行在YARN上的计算框架称为“X on YARN”，比如“MapReduce On YARN”, "Spark On YARN"，“Storm On YARN”等，
