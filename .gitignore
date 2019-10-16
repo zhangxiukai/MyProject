@@ -1,0 +1,108 @@
+
+/bin/
+target
+.svn
+.settings
+.classpath
+.project
+.cache
+.cache-main
+.cache-tests
+datanucleus.log
+.README.md.html
+/.idea/
+carpo-analytics/carpo-analytics.iml
+carpo-assembly/carpo-assembly.iml
+carpo-client/carpo-client.iml
+carpo-common/carpo-common.iml
+carpo-metastore/carpo-metastore.iml
+carpo-server/carpo-server.iml
+carpo-workflow/carpo-workflow.iml
+carpo-flowmaster/carpo-flowmaster.iml
+carpo-shell-executor/shell-test.jar
+*.iml
+*.DS_Store
+.idea
+/.project
+*.class
+metastore_db/
+
+
+######################
+# Node
+######################
+/node/**
+/node_modules/**
+
+
+######################
+# Intellij
+######################
+.idea/**
+
+
+######################
+# Maven
+######################
+/log/**
+/target/**
+
+######################
+# Gradle
+######################
+.gradle/**
+
+######################
+# Package Files
+######################
+*.war
+*.ear
+*.db
+
+######################
+# Windows
+######################
+# Windows image file caches
+Thumbs.db
+install.bat
+
+# Folder config file
+Desktop.ini
+
+
+######################
+# Directories
+######################
+/build/**
+/bin/**
+/spring_loaded/**
+/deploy/**
+
+######################
+# Logs
+######################
+*.log
+
+######################
+# Others
+######################
+*.class
+*.*~
+*~
+.merge_file*
+
+
+######################
+# Maven Wrapper
+######################
+!.mvn/wrapper/maven-wrapper.jar
+
+######################
+# Bower
+######################
+**/bower_components/**
+
+logs
+**/*.iml
+
+__pycache__
