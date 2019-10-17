@@ -1,0 +1,105 @@
+atomxi 启动项设置
+
+构建atomix单点启动步骤：
+
+  public static void main(String[] args) throws Exception {
+    // Parse the command line arguments.
+    final List<String> unknown = new ArrayList<>();
+    final Namespace namespace = parseArgs(args, unknown);       // 第一步，设置系统默认参数
+    final Namespace extraArgs = parseUnknown(unknown);          // 第二步，设置自定义参数
+    extraArgs.getAttrs().forEach((key, value) -> System.setProperty(key, value.toString()));
+
+    final Logger logger = createLogger(namespace);      // 第三步 设置日志信息
+
+    final Atomix atomix = buildAtomix(namespace);           // 第四步 build一个atomix服务
+    atomix.start().join();                                  // 第五步 启动atomix服务
+    logger.info("Atomix listening at {}", atomix.getMembershipService().getLocalMember().address());
+
+    final ManagedRestService rest = buildRestService(atomix, namespace);    // 第六步 构建rest服务
+    rest.start().join();                                                    // 第七步 启动REST服务
+    logger.warn("The Atomix HTTP API is BETA and is intended for development and debugging purposes only!");
+    logger.info("HTTP server listening at {}", rest.address());
+
+    synchronized (Atomix.class) {
+      while (atomix.isRunning()) {
+        Atomix.class.wait();
+      }
+    }
+  }
+
+
+1. 第一步   设置系统默认参数
+    1） 设置默认启动项参数
+        a） 转化节点ID /位置的参数类型，格式为id @ host：port。
+        b） 转化节点地址格式为host：port的参数类型
+        c） 初始化日志级别信息
+        d） 创建一个atomixServer的参数转换器，然后添加以下参数：   
+            1） 集群内部通信中使用的本地成员标识符。
+            2） 本地成员的地址。 如果未指定地址，则将使用第一个公共接口。
+            3） 运行此成员的主机，用于主机感知分区管理。
+            4） 运行该成员的机架，用于机架感知分区管理。
+            5） 该成员所在的区域，用于区域感知分区管理。
+            6） Atomix配置。 可以指定为文件路径或JSON / YAML字符串。
+            7） 加载配置文件时忽略类路径资源。 仅在提供配置文件时有效。
+            8） 类路径外部的可选登录配置文件的路径。
+            9） Atomix日志目录的路径。 该选项仅对使用atomix.log.directory属性的登录配置有效。
+            10） 所有Atomix日志的全局过滤日志级别。 该选项仅对使用atomix.log.level属性的登录配置有效。
+            11） 文件日志级别。 该选项仅对使用atomix.log.file.level属性的登录配置有效。
+            12） 控制台日志级别。 该选项仅对使用atomix.log.console.level属性的登录配置有效。
+            13） 默认的Atomix数据目录。 默认为.data
+            14） 要加入的静态成员集。 提供时，将使用引导节点发现。
+            15） 启用多播发现。 请注意，网络必须支持多播才能使此功能起作用。
+            16） 设置多播组。 默认为230.0.0.1。
+            17） 设置多播端口。 默认为54321。
+            18） 设置要绑定HTTP服务器的主机。 默认为0.0.0.0（所有接口）。
+            19） 设置运行HTTP服务器的端口。 默认为5678。
+        e） 将自定义的参数过滤出来并返回。
+
+2. 第二步  转换自定义的参数
+
+3. 第三步  为给定名称空间配置并创建一个新的日志服务。
+
+4. 第四步  从给定的名称空间构建一个新的Atomix实例。
+    1） 从给定的名称空间创建一个Atomix配置。
+    2） 开启 shutdown hook.
+
+5. 第五步  启动atomix服务
+    1） 开始管理者单播服务
+    2） 开启管理者广播服务
+    3） 开启管理者成员服务
+    4） 开启管理集群通信器
+    5） 开启管理集群事件服务
+
+6. 第六步 构建REST服务。
+
+7. 第七步 启动REST服务。
+
+
+构建 atomix 集群服务：
+
+    1） 设置集群标识符。 （群集标识符用于验证群集内通信是否在打算成为同一群集一部分的节点之间进行，例如 如果使用多播发现。 仅当多个Atomix群集在同一网络中运行时，才需要配置它。）
+    2） 设置本地成员标识符。 （成员标识符是可选属性，可用于标识消息并将消息直接发送到此节点。 如果未提供成员标识符，则将生成基于{@link java.util.UUID}的标识符。）
+    3） 设置成员主机名。
+    4） 设置成员端口。
+    5） 设置成员地址。 （构造的{@link AtomixCluster}将绑定到给定地址，以进行集群内通信。 提供的地址对集群中的其他节点应该是可见的。）
+    6） 设置成员所属的区域。 （zone属性可用于在某些原始协议的复制中启用区域感知。 它是一个任意字符串，应根据其物理位置将多个节点分组在一起。）
+    7） 设置成员所属的机架。 （可以使用rack属性在某些原始协议的复制中启用机架感知。 它是一个任意字符串，应根据其物理位置将多个节点分组在一起。）
+    8） 设置成员所属的主机。 （host属性可用于在某些原始协议的复制中启用主机感知。 它是一个任意字符串，应根据其物理位置将多个节点分组在一起。 通常，此属性仅适用于容器化集群。）
+    9） 设置成员属性。 （这些属性是任意设置，将与该节点的成员信息一起复制。 可使用属性来使其他节点确定有关此节点的元数据。）
+    10） 设置绑定实例的接口。
+    11） 设置绑定节点的本地端口。
+    12） 设置消息连接池的大小。 （节点将创建与每个定期通过TCP通信的对等方的{@code connectionPoolSize}连接。 来自群集成员协议的定期心跳将不会消耗池连接。 因此，如果节点未与其对等方之一进行通信以进行复制或应用程序通信，则该对等方的池应保持为空。）
+    13） 启用多播通信。 （默认情况下禁用多播。 必须调用此方法以启用它。 启用多播会启用{@link io.atomix.cluster.messaging.BroadcastService}。）
+    14） 设置多播地址。 （默认情况下禁用多播。 要启用多播，请首先使用{@link #withMulticastEnabled（）}。）
+    15） 设置集群成员身份协议。 （成员身份协议负责确定集群中成员的活动集，复制成员元数据并检测故障。 默认值为{@link HeartbeatMembershipProtocol}。）
+    16） 设置集群成员资格提供程序。 （成员资格提供者确定如何定位对等方以及如何引导群集。）
+    17） 为Atomic消息传递服务是否启用TLS。 （消息传递服务是所有Atomix协议通过其与对等方通信的服务。 启用消息传递服务的TLS为所有内部Atomix通信启用TLS。启用TLS后，除非提供了密钥库/信任库，否则Atomix将在{@code / conf}目录中寻找{@code atomix.jks}文件。）
+    18） 设置是否启用关闭挂钩。 （启用关闭挂钩后，实例将在JVM退出时关闭。）
+    19） 设置Atomix配置文件。 （配置文件是常见的配置，将在构造{@link Atomix}实例时应用于实例配置。）
+    20） 设置系统管理分区组。 （必须为有状态实例配置系统管理组。 该组将用于存储原始和事务元数据，并协调复制协议的主要选举。在此配置中定义节点的任何节点上都会复制配置的分区组。 即，此节点将参与提供给此方法的任何分区组。
+还可以在{@code management-group}键下的{@code atomix.conf}中配置管理组。）
+    21） 设置原始分区组。 （原语分区组表示分布式原语可以直接访问的分区。 要使用分区原语，至少一个节点必须配置有至少一个数据分区组。分区组名称用于在构造原始实例时唯一地标识组。 分区原语将引用在其中复制原语的特定协议和分区组。
+在此配置中定义节点的任何节点上复制配置的分区组。 即，此节点将参与提供给此方法的任何分区组。 分区组也可以在{@code partition-groups}键下的{@code atomix.conf}中进行配置。）
+    22） 添加原始分区组。 （提供的组将添加到已配置的分区组列表中。 原始分区组表示原始分布式可以直接访问的分区。 要使用原始分区，至少一个节点必须配置有至少一个数据分区组。）
+    23） 设置用户类型是否需要可序列化类型注册。
+
