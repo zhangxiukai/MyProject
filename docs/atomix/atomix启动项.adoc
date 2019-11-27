@@ -1,6 +1,6 @@
-atomxi 启动项设置
+= atomxi 启动项设置
 
-构建atomix单点启动步骤：
+## 构建atomix单点启动步骤：
 
   public static void main(String[] args) throws Exception {
     // Parse the command line arguments.
@@ -64,11 +64,11 @@ atomxi 启动项设置
     2） 开启 shutdown hook.
 
 5. 第五步  启动atomix服务
-    1） 开始管理者单播服务
-    2） 开启管理者广播服务
-    3） 开启管理者成员服务
-    4） 开启管理集群通信器
-    5） 开启管理集群事件服务
+    1） 开始管理者单播服务 (Netty unicast service.)
+    2） 开启管理者广播服务 (Netty broadcast service.)
+    3） 开启管理者成员服务 (Default )
+    4） 开启管理集群通信器 (Default )
+    5） 开启管理集群事件服务 (Default )
 
 6. 第六步 构建REST服务。
 
