@@ -1,9 +1,10 @@
 server:
   port: 16666
 
-
-
 spring:
+  thymeleaf:
+    prefix: classpath:/template/
+
   datasource:
     url: jdbc:linkoopdb:tcp://localhost:9105/ldb
     driverClassName: com.datapps.linkoopdb.jdbc.impl.JDBCDriver
