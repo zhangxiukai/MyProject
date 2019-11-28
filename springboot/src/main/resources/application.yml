@@ -1,0 +1,17 @@
+server:
+  port: 16666
+
+
+
+spring:
+  datasource:
+    url: jdbc:linkoopdb:tcp://localhost:9105/ldb
+    driverClassName: com.datapps.linkoopdb.jdbc.impl.JDBCDriver
+    username: admin
+    password: 123456
+    type: org.apache.tomcat.jdbc.pool.DataSource
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: update
+    database-platform:  org.hibernate.dialect.MySQL5Dialect
