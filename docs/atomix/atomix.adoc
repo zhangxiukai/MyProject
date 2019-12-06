@@ -57,7 +57,8 @@ Atmoix的所有远程调用接口都提供两种方式：异步、同步。Atomi
 
 ### 利用Atomix进行集群选举
 
-Atomix利用Raft算法进行集群选举。当集群初始无Leader节点的时候，也即无任何心跳检测，那么很快某个节点选举定时器将会超时，改节点将会变成’候选人’进行集群内投票，与任何一款分布式一致性算法相同，只有收到超过半数选票后方能提升为leader节点。当leader挂了，follower收不到heartbeat，那么选举定时器再次超时，新一轮（TERM）选举即将再次上演！
+Atomix利用Raft算法进行集群选举。当集群初始无Leader节点的时候，也即无任何心跳检测，那么很快某个节点选举定时器将会超时，
+该节点将会变成’候选人’进行集群内投票，与任何一款分布式一致性算法相同，只有收到超过半数选票后方能提升为leader节点。当leader挂了，follower收不到heartbeat，那么选举定时器再次超时，新一轮（TERM）选举即将再次上演！
 
   // Atomix的抽象基础是资源，group也是一种分布式资源
   DistributedGroup group = atomixReplica.getGroup("group").get();
@@ -77,7 +78,10 @@ Atomix利用Raft算法进行集群选举。当集群初始无Leader节点的时�
   // 离开group
   localMember.leave();
 
-想要进行集群选举，就需要先获得DistributedGroup对象，该对象是Atomix资源的一种，注意与Cluster的节点相区别，一个Cluster可以有多个group，每个group都有自己唯一一个leader。举个例子，一个Cluster可以有5个节点，如果只设了一个group，那么这个集群只有一个leader，如果设置了两个group，则这两个group分别有一个leader，这两个leader可能是同一个节点，也可能是两个不同的节点。LocalMember是本地成员的一个领域模型，通过LocalMember对象我们能得到当前节点的id标志（全局唯一），离开group。通过election()可以注册集群选举回调，当发生回调的时候，我们可以通过判断当前group的leader（Term.leader()）是否是本节点（LocalMember)。
+想要进行集群选举，就需要先获得DistributedGroup对象，该对象是Atomix资源的一种，注意与Cluster的节点相区别，一个Cluster可以有多个group，每个group都有自己唯一一个leader。
+举个例子，一个Cluster可以有5个节点，如果只设了一个group，那么这个集群只有一个leader，如果设置了两个group，则这两个group分别有一个leader，这两个leader可能是同一个节点，也可能是两个不同的节点。
+LocalMember是本地成员的一个领域模型，通过LocalMember对象我们能得到当前节点的id标志（全局唯一），离开group。通过election()可以注册集群选举回调，
+当发生回调的时候，我们可以通过判断当前group的leader（Term.leader()）是否是本节点（LocalMember)。
 
 除了以上功能，group还可以注册其他监听器，来感知整个group组的加入、退出变化：
 
@@ -129,7 +133,8 @@ group资源除了能够进行集群选举，也可以用来进行单播或组播
   MessageProducer<String> producer = group.messaging().producer("topic", options);
   producer.send("broadcast message");
 
-上述代码与单播基本类似，不同的是这里使用DistributedGroup发送消息。Options配置可以设置execution(ASYNC,SYNC,REQUEST_REPLY)方式和delivery(BROADCAST,DIRECT,RANDOM)方式。ASYNC不需要等待消费者回复、SYNC必须等待所有消费者回复、REQUEST_REPLY只要有一个消费者回复即可。BROADCAST集群广播方式，DIRECT单播，RANDOM随机挑选节点进行广播。
+上述代码与单播基本类似，不同的是这里使用DistributedGroup发送消息。Options配置可以设置execution(ASYNC,SYNC,REQUEST_REPLY)方式和delivery(BROADCAST,DIRECT,RANDOM)方式。
+ASYNC不需要等待消费者回复、SYNC必须等待所有消费者回复、REQUEST_REPLY只要有一个消费者回复即可。BROADCAST集群广播方式，DIRECT单播，RANDOM随机挑选节点进行广播。
 
 ### 利用Atomix分布式资源
 
@@ -139,7 +144,10 @@ group资源除了能够进行集群选举，也可以用来进行单播或组播
 分布式Long值资源
 分布式同步资源
 分布式集合资源
-这里的资源创建于group不同，group的创建须由集群内节点（AtomixReplica）创建。而上述4种资源均可以由客户端进行创建，并持久化到每个集群节点，其一致性当然由Atomix保证（Copycat）。在Atomix的实现中，这些资源并不只是保存在内存中，宕机恢复以后，Atomix节点会读取本地事务日志，进行事务reply，恢复之前的所有数据，只有当所有事务日志清空后才会真正清除所有数据。根据Raft算法，有且仅有leader节点负责写入操作，写入后再同步到follower节点，然后进行二阶段提交。因此，频繁写入型系统，为减少数据一致性同步开销，不应设置过多节点；而读写比高的应用可以设置多节点，以分担读取压力。无论怎样，节点数应设置为2n+1，其中n是可容忍的最大故障节点数。
+这里的资源创建于group不同，group的创建须由集群内节点（AtomixReplica）创建。而上述4种资源均可以由客户端进行创建，并持久化到每个集群节点，其一致性当然由Atomix保证（Copycat）。
+在Atomix的实现中，这些资源并不只是保存在内存中，宕机恢复以后，Atomix节点会读取本地事务日志，进行事务reply，恢复之前的所有数据，只有当所有事务日志清空后才会真正清除所有数据。
+根据Raft算法，有且仅有leader节点负责写入操作，写入后再同步到follower节点，然后进行二阶段提交。因此，频繁写入型系统，为减少数据一致性同步开销，不应设置过多节点；
+而读写比高的应用可以设置多节点，以分担读取压力。无论怎样，节点数应设置为2n+1，其中n是可容忍的最大故障节点数。
 
 ### 值对象资源
 
@@ -154,7 +162,8 @@ group资源除了能够进行集群选举，也可以用来进行单播或组播
   // 异步获得数据
   value.get().thenAccept(System.out::println);
 
-以上需要注意两点，其一这里的值对象是一个泛型定义，如果想使用自己的领域对象，则需要实现序列化接口。其二，值对象可设置超时时间，如果不设置超时时间，则永不过期。
+以上需要注意两点，其一这里的值对象是一个泛型定义，如果想使用自己的领域对象，则需要实现序列化接口。
+其二，值对象可设置超时时间，如果不设置超时时间，则永不过期。
 
 ### Long值资源
 
