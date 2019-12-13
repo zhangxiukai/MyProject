@@ -3,10 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <title>首页</title>
+    <script src="jquery/dist/jquery.js"></script>
+    <script>
+        $(document).ready(function() {
+            $("#btn1").click(function () {
+                $.get("/scheduler/once", function (resp) {
+                    console.log(resp)
+                })
+            })
+        })
+    </script>
 </head>
 <body>
     <div>
         <h1>测试页面</h1>
     </div>
+
+    <div id='btn1'><button>单次调度</button></div>
+
 </body>
 </html>

@@ -3,7 +3,7 @@ server:
 
 spring:
   thymeleaf:
-    prefix: classpath:/template/
+    prefix: classpath:/templates/
 
   datasource:
     url: jdbc:linkoopdb:tcp://localhost:9105/ldb
