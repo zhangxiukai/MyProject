@@ -1,334 +1,1069 @@
-## 概述
+== 概述
 
-大多数分布式应用程序要求某些有状态组件保持一致且容错。
-Atomix是一个可嵌入的库，有助于实现分布式资源的容错和一致性。
+Atomix是一个功能完备的用于构建容错分布式系统的框架。结合ZooKeeper的一致性和Hazelcast的易用性及性能表现，Atomix使用了一组定制的通信接口，分片的Raft集群，以及multi-primary协议来为构建分布式系统提供一系列的高抽象层次的原生组件。
 
-## 原理
-atomix整体的技术栈大致如下图所示：
+=== atomix提供的特征
 
-image::../image/atomix.png[]
+* 分布式数据结构(maps, sets, trees, counters, values, etc)
 
-从上到下分别是，Atomix、Copycat、Catalyst，其中Copycat提供了raft算法的完整特性实现，并提供了一套分布式状态机，我们所使用的Atomix所有框架功能都是直接或间接封装了Copycat。Catalyst提供了一套异步io和序列化框架，主要作为Copycat的网络支持层。Atomix提供了集群选举、分布式框架、分布式并发控制，组播等功能，同时也可自定义分布式状态机。
+* 分布式通信(direct, publish-subscribe, etc)
 
-Atomix并不神秘，他能做到的功能，大部分Zookeeper也能做到。不同的是，Atomix本身作为一个框架，是面向一致性系统开发者的；而Zookeeper本身作为一款功能完整的中间件系统，则是面向分布式系统使用者的。如果资源条件有限，不能利用中间件进行选举，那么Atomix将是不二法门。
+* 分布式协作(locks, leader elections, semaphores, barriers, etc)
 
+* 组成员管理(集群及集群节点管理)
 
-## Atomix集群初始化
+=== 基于各种协议保证了不同程度的分布式一致性
 
-### 集群创建
+* Multi-Raft - 强一致的分区一致算法
 
-    // 定义集群所有节点
-    List<Address> clusters = Lists.newArrayList(/*....*/);
-    // 定义本机地址
-    Address address = new Address("localhost", 5001);
-    // replica即一个副本，也可以理解为一个节点
-    AtomixReplica atomix = AtomixReplica.builder(address)
-        // transport类型
-        .withTransport(new NettyTransport())
-        // 日志存储地址
-        .withStorage(new Storage("/logs/xxx"))
-        // 还有其他配置请参考后文
-        .build();
-    //启动并加入集群，如果集群本身没有启动则新创建集群
-    atomix.bootstrap(clusters).join();
+* Multi-Primary - 一致的基于主节点选举的同步/异步复制算法
 
-其中集群中clusters地址可通过运维管控平台（如果有）进行推送，或者存储到DB中，甚至也可以文件形式存在本地。
+* Anti-entropy - 高扩展性的保证最终一致的gossip/reconciliation沟通协调协议
 
-### Atomix客户端
+* CRDT - 最终强一致的gossip风格的复制协议
 
-AtomixReplica是作为集群的一个复制节点存在，而客户端(AtomixClient)则是作为Atomix使用者加入集群，需要注意二者的区别。客户端的创建可参考如下代码：
+原生组件是线程安全的，异步并活跃的，重度依赖于事件通知机制以监测到系统的状态变化，并且可以使用各种方式进行访问，包括：
 
-  // 创建客户端
-  AtomixClient client = AtomixClient.builder()
-      .withTransport(new NettyTransport())
-      .build();
-  // 异步连接clusters
-  client.connect(clusters).thenRun(() -> {
-      System.out.println("Client connected!");
-  }).get();
-  // 同步连接
-  //client.connect(clusters).join();
-  return client;
+* 异步APIs
+* 同步APIs
+* REST APIs
 
-Atmoix的所有远程调用接口都提供两种方式：异步、同步。AtomixClient与AtomixReplica的使用基本一样。
+并可以通过：
 
+* Java builders
+* HOCON configurations
+* JSON configurations
 
-## Atomix的使用
+来进行配置。
 
-### 利用Atomix进行集群选举
+=== 背景
 
-Atomix利用Raft算法进行集群选举。当集群初始无Leader节点的时候，也即无任何心跳检测，那么很快某个节点选举定时器将会超时，
-该节点将会变成’候选人’进行集群内投票，与任何一款分布式一致性算法相同，只有收到超过半数选票后方能提升为leader节点。当leader挂了，follower收不到heartbeat，那么选举定时器再次超时，新一轮（TERM）选举即将再次上演！
+Atomix最初在2014年构想出来的，同时构想的还有其姐妹项目Copycat(deprecated)作为一个业余兴趣项目。随着时间推进，Copycat成长为一个成熟的Raft一致性协议的实现，并且Copycat和Atomix都在各种项目中被应用了起来。在2017年，一个新的版本开始开发，Copycat和Atomix合并成了Atomix 3.x。此外，在ONOS中对本项目的巨大的扩展也被合并进Atomix 3.x。Atomix目前作为ONOS的一个核心组件而被Open Networking Foundation所维护。
 
-  // Atomix的抽象基础是资源，group也是一种分布式资源
-  DistributedGroup group = atomixReplica.getGroup("group").get();
-  // 加入该group
-  LocalMember localMember = group.join().get();
-  // 获得本节点的唯一标示id
-  System.out.println("本节点id:" + localMember.id());
-  // 选举回调
-  group.election().onElection(term -> {
-      // term为当前选举任期信息
-      if (term.leader().equals(localMember)) {
-          System.out.println("选上领导了");
-      } else {
-          System.out.println("没有选上,Leader：" + term.leader());
-      }
-  });
-  // 离开group
-  localMember.leave();
+== 与其他开源组件的比较
 
-想要进行集群选举，就需要先获得DistributedGroup对象，该对象是Atomix资源的一种，注意与Cluster的节点相区别，一个Cluster可以有多个group，每个group都有自己唯一一个leader。
-举个例子，一个Cluster可以有5个节点，如果只设了一个group，那么这个集群只有一个leader，如果设置了两个group，则这两个group分别有一个leader，这两个leader可能是同一个节点，也可能是两个不同的节点。
-LocalMember是本地成员的一个领域模型，通过LocalMember对象我们能得到当前节点的id标志（全局唯一），离开group。通过election()可以注册集群选举回调，
-当发生回调的时候，我们可以通过判断当前group的leader（Term.leader()）是否是本节点（LocalMember)。
+=== Hazelcast
 
-除了以上功能，group还可以注册其他监听器，来感知整个group组的加入、退出变化：
+    与atomix一样，Hazelcast也提供了一组primitives以供复制及协同分布式系统的状态变化，但是Hazelcast的复制算法并不适合构建分区容忍系统。atomix总是建立在强一致性及正确性优先的概念上的。同时atomix也提供了Hazelcast风格的基于内存的数据网格(data grid)复制（通过主备分区组primary-backup partition groups），但绝对不会牺牲提供强一致性保障的可选项。事实上，Atomix对于锁、leader选举及其他安全敏感的原生组件(primitives)都不推荐在非强一致性下使用。
 
-  group.onJoin(m->System.out.println("加入grou:id：" + m.id()));
-  group.onLeave(m->System.out.println("离群group:id：" + m.id()));
+=== zookeeper
+	zk或许是开源分布式系统中最稳定的。atomix相较于zk来说，在可用性及可定制性上有优势。zk提供的组件更偏低层次，而atomix提供的组件更偏高层次。例如，zk提供了watches可用来实现分布式锁，而atomix直接就提供了一个原生锁以满足分布式锁的使用场景，这允许我们在atomix集群中无需使用昂贵的协作如乐观和悲观锁，就可以实现更复杂的原子状态更改。zk和raft一样也基于节点选举，这限制了其扩展性。Atomix使用raft来做复制，它可以在raft分区组中使用一种称为“Multi-Raft”的协议，允许基于raft的原生组件(primitives)散布到多个raft leader以增加平行度。
 
-也可以遍历当前group中的所有节点
+== 关键字
 
-  for (GroupMember groupMember : group.members()) {
-    System.out.println(groupMember.id());
+[options="header"]
+|==========================
+| 关键字 | 说明
+| primitive | atomix中的术语，代表了atomix支持的各种分布式数据结构，译为“原生组件”
+| replicate | 复制，代表了原生组件的状态更改在基于atomix的分布式集群上使用指定的协议来保证一定程度一致性传递的动作
+| partition | 分区，定义在集群节点之上，原生组件可在其中被复制及保证某种程度一致性的逻辑概念。一个分区可视为某个复制协议(raft, primary-backup)的一个实例，通过分区组的方式使用。
+| partition group | 分区组，代表了一组分区，这组分区在配置（分组成员，使用协议等）上是完全相同的。分区组当然也可以设置为只有一个分区。atomix分布式原生组件存在于被称为分区组的集群的一部分之中。
+|==========================
+
+== 基本概念
+
+=== 集群(cluster)
+
+Atomix集群包含一组相互通信的成员（members），使用各种协议来共享状态。当一个成员（member）启动时，它基于自己的配置连到一组明确指定或未明确指定的端点。
+
+=== 复制协议(replication protocol)
+
+复制协议是atomix实现的用来在节点间分享状态的分布式协议。atomix core依赖几个不同类型的协议以实现一致性由强到弱的传递状态。
+
+* raft
+
+	在内核中，raft协议管理着记载原生组件(primitives)变化的分布式持久化的日志。通过选举一个leader并将变化同步复制到followers来实现。一致性通过只选举拥有所有最近变动的leader来维护。
+	Raft协议的一个重要的特征是，当集群中的大部分节点可用时，才可以继续工作。在网络断开的情况下，只有拥有多数节点的那个分区才能继续工作。
+
+* primary-backup
+
+	主备(primary-backup)协议是一个更简单的基于内存的提供较弱一致性的协议。不像raft，Atomix主备协议可以容忍丢失到只有一个节点，状态变动可以通过同步或异步方式复制给任意数目的节点。这使得主备协议更适合高性能要求的场景。
+	主备协议通过选举一个主节点来工作，然后由主节点复制给备节点。如果atomix集群使用raft管理分区，那么所有主备协议实例的主节点选举都会通过raft复制状态机达到强一致性。否则，一个最终一致的主节点选举算法会被使用。
+
+* gossip
+
+	gossip是一类最终一致的复制算法，基于与随机节点的周期性的信息交换。Atomix的gossip算法使用多种特性以保证最终一致性或使用了CRDTs的最终强一致性。在一些场景下逆熵(anti-entropy)协议被用来应对某些类型的失败。
+
+=== 分区组（partition groups）
+
+Atomix中的分布式原生组件(primitives)使用前面章节描述的复制协议进行复制。为了使复制可行，集群必须配置一组分区组，在这些组中原生组件(primitives)才可以被复制。
+
+分区组是一组raft协议或主备协议的实例，这些实例用来复制具体的被命名的原生组件实例。
+
+当集群组建的时候，集群的成员必须定义它将要参与的分区组。例如一个参与主备分区组的节点可能会配置如下：
+
+[source,json]
+----
+cluster.local-member {
+  id: member1
+  address: "localhost:5000"
+}
+
+management-group {
+  type: primary-backup
+  name: system
+  partitions: 1
+}
+
+partition-groups.data {
+  type: primary-backup
+  name: data
+  partitions: 32
+}
+----
+
+配置中定义的管理组（management-group）用来保存原生组件(primitives)的元数据，并选举主节点。分区组（partition-groups）用来保存原生组件的状态。
+
+注意，节点只需要配置它们要参加的分区组。集群的不同节点上可能存在多个分区组，当一个原生组件创建出来时，它可以指定在哪一个分区组里被复制。
+
+这允许不同的原生组件简单的根据集群配置就可以复制到不同的节点。
+
+分区数是分区组的配置中最重要的属性。每一个分区是所在分区组实现的复制协议的一个实例。分区数越多，在复制的时候就能达到越高的平行度。
+
+例如，一个有3个分区数的raft分区组，代表了raft协议的3个实例。一个保存在该分区组中的分布式map将会分布在所有这3个分区中，这允许多个raft leader并发的复制原生组件(primitives)的变更，这也是atomix比类似的系统有更大扩展性的原因。
+
+=== 分布式原生组件(distributed primitives)
+
+分布式原生组件是atomix在分布式系统中复制状态和协同状态变化的核心。分布式原生组件是解决分布式系统问题的高级别抽象。原生组件接口设计的尽可能与 Java collections和java.util.concurrent APIs相似。
+
+每一个atomix原生组件都用一个字符串名称来标识，通过该名称可引用到在atomix集群中的多个节点上的相同状态。
+
+[source, java]
+----
+DistributedSet<String> set = atomix.getSet("my-set");
+set.add("foo");
+----
+
+每一个原生组件都提供了同步和异步的接口：
+
+[source, java]
+----
+AsyncDistributedSet<String> asyncSet = atomix.getSet("my-set").async();
+asyncSet.add("foo").thenRun(() -> {
+  ...
+});
+----
+
+当对原生组件做了操作，Atomix会透明的使用配置的协议来复制状态，如此一来，单个节点的失效不会导致状态的丢失。一个实例可以通过使用相同的名字创建一个相同原生组件的实例以观察到另一个实例的变化。
+
+[source, java]
+----
+DistributedSet<String> set = atomix.getSet("my-set");
+if (set.contains("foo")) {
+  ...
+}
+----	
+
+=== 原生组件协议(primitive protocols)
+
+Atomix原生组件基于他们被指定的分区组实现的协议来保存及复制。每一个原生组件都被保存在一个raft协议分区组或主备协议分区组中，每个指定协议的具体行为可以在原生组件协议(primitive protocols)配置中定义：在创建原生组件的时候使用withProtocol()来设置。
+
+[source, java]
+----
+DistributedSet<String> set = atomix.setBuilder("my-set")
+  .withProtocol(MultiPrimaryProtocol.builder("data")
+    .withNumBackups(2)
+    .withReplication(Replication.ASYNCHRONOUS)
+    .build())
+  .build();
+----
+
+也可以通过配置文件来提供：
+
+[source, json]
+----
+primitives.my-set {
+  protocol {
+    type: multi-primary
+    backups: 2
+    replication: asynchronous
   }
+}
+----
 
-## 利用Atomix进行集群单播、组播
+[source, java]
+----
+DistributedSet<String> set = atomix.getSet("my-set");
+----
 
-group资源除了能够进行集群选举，也可以用来进行单播或组播。
+原生组件协议指定了原生组件在哪个分区组中被复制，以及指定协议在复制时的具体行为。
 
-单播需要使用GroupMember对象：
+== 集群通信
 
-生产者代码：
+=== 直接通信
 
-  // 需要给谁发送
-  GroupMember member = group.member("node1");
-  // 创建producer
-  MessageProducer<String> producer = member.messaging().producer("topic");
-  // 异步发送消息
-  producer.send("this is a message").thenRun(()->{
-    //consumer ack
-  });
+atomix提供了多种服务用于直接或者发布/订阅方式的通信。支撑各种通信抽象的底层是jetty，jetty用于所有的集群内部通信。直接通信通过ClusterCommunicationService接口实现，ClusterCommunicationService接口支持单播(unicast), 多播(multicast), 广播(broadcast), 和请求/响应(request-reply)的消息模式。
 
-消费者代码：
+集群内部通信的一个重要的概念是消息主题。主题是一个用来表示所传播消息的主观类型的字符串。与消息队列的主题概念类似。
 
-  MessageConsumer<String> consumer = localMember.messaging().consumer("topic");
-  consumer.onMessage(m->{
-      // 收到的消息
-      System.out.println("收到消息" + m.message());
-      // 可以进行reply
-      m.reply("my reply");
-      // 也可以直接ack
-      m.ack();
-      // 也可以发送失败
-      m.fail();
-  });
+消息会被消息订阅者接收：
 
-组播则需要使用DistributedGroup领域模型：
+[source, java]
+----
+atomix.getCommunicationService().subscribe("test", message -> {
+  return CompletableFuture.completedFuture(message);
+});
+----
 
-  MessageProducer.Options options = new MessageProducer.Options()
-      .withDelivery(MessageProducer.Delivery.RANDOM)
-      .withExecution(Execution.SYNC);
-  MessageProducer<String> producer = group.messaging().producer("topic", options);
-  producer.send("broadcast message");
+可以注册三种类型的订阅者：
 
-上述代码与单播基本类似，不同的是这里使用DistributedGroup发送消息。Options配置可以设置execution(ASYNC,SYNC,REQUEST_REPLY)方式和delivery(BROADCAST,DIRECT,RANDOM)方式。
-ASYNC不需要等待消费者回复、SYNC必须等待所有消费者回复、REQUEST_REPLY只要有一个消费者回复即可。BROADCAST集群广播方式，DIRECT单播，RANDOM随机挑选节点进行广播。
+* A synchronous subscriber that returns a result and must provide an Executor on which to consume messages
+* An asynchronous subscriber that must return CompletableFuture
+* A consumer that must provide an Executor on which to consume messages
 
-### 利用Atomix分布式资源
+对于定制对象，可以提供定制的序列化器(serializers)。
 
-除了group资源以外，Atomix还支持如下集中资源：
+如上所述，消息可以通过各种方式进行发送：
 
-分布式值对象资源
-分布式Long值资源
-分布式同步资源
-分布式集合资源
-这里的资源创建于group不同，group的创建须由集群内节点（AtomixReplica）创建。而上述4种资源均可以由客户端进行创建，并持久化到每个集群节点，其一致性当然由Atomix保证（Copycat）。
-在Atomix的实现中，这些资源并不只是保存在内存中，宕机恢复以后，Atomix节点会读取本地事务日志，进行事务reply，恢复之前的所有数据，只有当所有事务日志清空后才会真正清除所有数据。
-根据Raft算法，有且仅有leader节点负责写入操作，写入后再同步到follower节点，然后进行二阶段提交。因此，频繁写入型系统，为减少数据一致性同步开销，不应设置过多节点；
-而读写比高的应用可以设置多节点，以分担读取压力。无论怎样，节点数应设置为2n+1，其中n是可容忍的最大故障节点数。
+* unicast sends a message to a single peer without awaiting a response
+* multicast sends a message to a set of members without awaiting any responses
+* broadcast sends a message to all members known to the local ClusterMembershipService without awaiting any responses
+* send sends a direct message to a peer and awaits a response via CompletableFuture
 
-### 值对象资源
+[source, java]
+----
+// Send a request-reply message to node "foo"
+atomix.getCommunicationService().send("test", "Hello world!", MemberId.from("foo")).thenAccept(response -> {
+  System.out.println("Received " + response);
+});
+----
 
-  AtomixClient client = connect();
-  DistributedValue<String> value = client.<String>getValue("test-value").get();
-  // 同步获得数据
-  System.out.println(value.get().join());
-  // 不带有过期时间的设置
-  value.set("lala");
-  // 带有时间的设置
-  value.set("lala", Duration.ofDays(10));
-  // 异步获得数据
-  value.get().thenAccept(System.out::println);
+ClusterCommunicationService使用一个默认的序列化器来序列化系统核心的数据结构，但是还是经常需要传递一些定制类型对象。消息服务提供了重载函数以便为请求/响应的随意类型的消息提供编码/解码器：
 
-以上需要注意两点，其一这里的值对象是一个泛型定义，如果想使用自己的领域对象，则需要实现序列化接口。
-其二，值对象可设置超时时间，如果不设置超时时间，则永不过期。
+[source, java]
+----
+Serializer serializer = Serializer.using(Namespace.builder()
+  .register(Namespaces.BASIC)
+  .register(MemberId.class)
+  .register(ClusterHeartbeat.class)
+  .build());
 
-### Long值资源
+ClusterHeartbeat heartbeat = new ClusterHeartbeat(atomix.getMembershipService().getLocalMember().id());
+atomix.getCommunicationService().broadcast("test", heartbeat, serializer::encode);
+----
 
-  // 获得long变量，初始化时为0
-  DistributedLong distributedLong = client.getLong("test-long").get();
-  // long的基本操作
-  System.out.println(distributedLong.getAndDecrement().join());
-  System.out.println(distributedLong.getAndAdd(10).join());
-  System.out.println(distributedLong.getAndDecrement().join());
+=== 发布/订阅消息
 
-### 分布式同步资源
+发布订阅消息通过ClusterEventService接口实现，该接口与ClusterCommunicationService在模型上比较接近。事实上，尽管这俩看起来非常一样，他们在语义上有很大的不同。
 
-  AtomixClient client = connect();
-  CompletableFuture<DistributedLock> completableFuture =  client.getLock("my_lock");
-  // 异步api
-  completableFuture.thenAccept(lock -> {
-      lock.lock().thenRun(()->System.out.println("得到了锁"));
-  });
-  // 同步api
-  DistributedLock lock = completableFuture.get();
-  lock.lock().join();
+点对点的消息发送是ClusterEventService通过轮询方式投递的，多播消息也并不要求任何指定的节点信息，这样就将发送者和接收者解耦了。
 
-### 分布式集合资源
+[source, java]
+----
+// Add an event service subscriber
+atomix.getEventService().subscribe("test", message -> {
+  return CompletableFuture.completedFuture(message);
+});
 
-Atomix支持比较丰富的分布式集合，如下：
+// Send a request-reply message via the event service
+atomix.getEventService().send("test", "Hello world!").thenAccept(response -> {
+  System.out.println("Received " + response);
+});
 
-DistributedMap
-DistributedSet
-DistributedQueue
-DistributedMultiMap
-其中使用方式都大同小异，这里只看一下DistributedMap如何使用，其他的使用方式请参考代码片段。
+// Broadcast a message to all event subscribers
+atomix.getEventService().broadcast("test", "Hello world!");
+----
 
-  AtomixClient client = connect();
-  CompletableFuture<DistributedMap<String, String>> completableFuture = client.getMap("my_map");
-  DistributedMap<String, String> map = completableFuture.join();
-  // 同步调用
-  if (map.containsKey("key").join()) {
-      String value = map.get("key").join();
-      System.out.println(value);
-  } else {
-      //do others
+== 集群管理
+
+=== 集群配置
+
+Atomix类继承了AtomixCluster类，提供了独立的API用于组成员管理和集群通信。
+
+==== 成员(members)
+
+当配置一个集群的时候，必须提供一个本地成员（local member）。成员对象代表了加入集群的节点的位置信息。成员支持下列属性：
+
+* memberId()  - 成员的全局ID
+* address() - 其他成员可以与本节点通信的TCP地址
+* zone() - 构建成员组用的可选字符串
+* rack() - 构建成员组用的可选字符串
+* host() - 构建成员组用的可选字符串
+
+可使用builder风格来配置一个成员：
+
+[source, java]
+----
+AtomixBuilder builder = Atomix.builder()
+  .withMemberId("member1")
+  .withAddress("localhost:5000");
+----
+
+==== 启动集群
+
+为了启动一个atomix集群，配置Atomix实例的discovery，member-discovery信息并调用start()方法。start()方法返回一个CompletableFuture，该Future会在集群构建成功后完成。
+
+[source, java]
+----
+Atomix atomix = Atomix.builder()
+  .withMemberId("member1")
+  .withAddress("localhost:5000")
+  .withMulticastEnabled()
+  .build();
+
+atomix.start().join();
+----
+
+基于atomix实例的配置，要完成启动一个集群可能会要求法定人数。例如实例配置了一个raft分区组，任何一个单个成员启动完成都需要组成员的大部分先启动起来。
+
+=== 成员发现(member discovery)
+
+成员发现是Atomix构建新集群和加入原有集群的核心。当一个atomix实例启动，它使用一个可配置的NodeDiscoveryProvider服务来定位需要通信及共同构建集群的点。
+
+该provider在AtomixBuilder或集群配置中进行配置。Atomix提供了一些内置的discovery providers来帮助构建集群。
+
+* Bootstrap Provider
+
+    构建一个集群的最简单的方法是列出要连接的节点的列表，这可以通过使用BootstrapDiscoveryProvider来完成。
+
+[source, java]
+----
+Atomix atomix = Atomix.builder()
+  .withAddress("localhost:5000")
+  .withMembershipProvider(BootstrapDiscoveryProvider.builder()
+    .withNodes(
+      Node.builder()
+        .withId("member1")
+        .withAddress("localhost:5001")
+        .build(),
+      Node.builder()
+        .withId("member2")
+        .withAddress("localhost:5002")
+        .build(),
+      Node.builder()
+        .withId("member3")
+        .withAddress("localhost:5003")
+        .build(),)
+    .build())
+
+atomix.start().join();
+----
+
+* Multicast Discovery
+
+    Multicast Discovery可以用来动态定位集群中的节点。使用withMulticastEnabled方法来启用Multicast Discovery。
+
+[source, java]
+----
+Atomix atomix = Atomix.builder()
+  .withAddress("localhost:5000")
+  .withMulticastEnabled()
+  .build();
+----
+
+通过withMulticastAddress(Address)方法可以提供一个可选的广播地址：
+
+[source, java]
+----
+Atomix atomix = Atomix.builder()
+  .withAddress("localhost:5000")
+  .withMulticastEnabled()
+  .withMulticastAddress("230.0.0.1:54321")
+  .build();
+----
+
+如果想要更复杂的配置multicast，可以将MulticastDiscoveryProvider提供给AtomixBuilder的withMembershipProvider方法。
+
+[source, java]
+----
+Atomix atomix = Atomix.builder()
+  .withAddress("localhost:5000")
+  .withMulticastEnabled()
+  .withMembershipProvider(MulticastDiscoveryProvider.builder()
+    .withBroadcastInterval(Duration.ofSeconds(1))
+    .build())
+  .build();
+----
+
+当启用了multicast以后，实例会在启动时广播本地成员(local member)的信息，并在随后周期性广播。短生命周期节点初始化的确认完全使用组播。一旦一个节点通过组播方式被发现，那么它将会通过TCP方式被连接，然后标准的失败检测机制会进行接管。
+
+=== 分区组
+
+atomix分布式原生组件存在于被称为分区组的集群的一部分之中。分区组是分布在集群中使用配置的复制协议的多个节点之上的一组分区的集合。atomix集群可以配置任意数目的分区组。
+
+每一个组都可以复制自己独有的一组原生组件。
+
+每一个分区组配置有三个标准的属性：
+
+* name - every partition group must have a name that is unique across all partition groups in the cluster
+
+* type - the partition group type defines the replication protocol implemented by the partitions. In Java builders, the type is the partition group class (e.g. RaftPartitionGroup implements the Raft protocol), but in configuration files the type must be provided
+
+* partitions - the number of partitions in the group
+
+==== 分组发现
+
+节点只需要配置自己想要参与的分组。没有配置分组的节点，在启动的时候会发现其他节点配置的分组。注意，在网络分裂的情况下，分组发现可能会阻塞或使启动过程失败。
+
+==== 管理组(management group)
+
+集群在配置分区组之前，必须先配置系统管理组。Atomix内部使用管理组来保存原生组件(primitives)信息，并通过分区组与复制协议合作。例如，主备分区组实现使用管理组来完成主节点的选举。
+
+使用atomix builder的withManagementGroup方法来设置管理组：
+
+[source, java]
+----
+Atomix atomix = Atomix.builder()
+  .withLocalMember(...)
+  .withMembers(...)
+  .withManagementGroup(RaftPartitionGroup.builder("system")
+    .withNumPartitions(1)
+    .withMembers("member-1", "member-2", "member-3")
+    .build())
+  .build();
+----
+
+注意，如果一个原生组件分组被定义，那么一定要先定义管理组
+
+==== 原生组件分组(primitive groups)
+
+系统管理组帮助atomix管理分布式原生组件和分区组，但是为了保存和复制原生组件，额外的分区组必须被定义。集群可以配置任何数目的分区组，而原生组件实例可以在任何希望的分区组上被复制。
+
+在atomix的builder中使用withPartitionGroups来定义一个分区组。
+
+[source, java]
+----
+Atomix atomix = Atomix.builder()
+  .withLocalMember(...)
+  .withMembers(...)
+  .withManagementGroup(RaftPartitionGroup.builder("system")
+    .withNumPartitions(1)
+    .withMembers("member-1", "member-2", "member-3")
+    .build())
+  .withPartitionGroups(
+    PrimaryBackupPartitionGroup.builder("data")
+      .withNumPartitions(32)
+      .build())
+  .build();
+----
+
+==== raft分区组
+
+raft协议是2013年提出的一致性协议。一致性协议是分区可容忍的并提供强一致性保障（线性、顺序一致性），这种特性对于合作非常有用。然而，强一致性在配置及性能表现方面需要付出一定代价。
+
+RaftPartitionGroup提供了一组分区，这些分区是基于raft协议的完全的、成熟的实现。使用bulider来配置一个raft分区组：
+
+[source, java]
+----
+RaftPartitionGroup.Builder raftBuilder = RaftPartitionGroup.builder("data");
+----
+
+非常重要的是，raft分区组要求明确指定其成员。每一个raft分区组在启动的时候必须确定它的分区实例将要在哪些集群成员上进行复制。如果没有明确指定的成员，那么在启动集群的时候若发生网络断开，raft分区可能发生脑裂。使用withMembers来指定成员：
+
+[source, java]
+----
+raftBuilder.withMembers("member-1", "member-2", "member-3");
+----
+
+raft分区组的成员必须被明确的命名。即使一个节点崩溃了，raft分区组的法定人数也不会变，在投票计数的时候崩溃的节点也会被算一个人头。
+
+atomix集群的管理组强烈建议使用raft分区组。当被配置成集群的管理组，raft会为主备分区组提供可靠的主节点选举：
+
+[source, java]
+----
+Atomix atomix = Atomix.builder()
+  .withLocalMember("member-1")
+  .withMembers(
+      Member.builder("member-1")
+        .withAddress("localhost:5001")
+        .build(),
+      Member.builder("member-2")
+        .withAddress("localhost:5002")
+        .build(),
+      Member.builder("member-3")
+        .withAddress("localhost:5003")
+        .build())
+  .withManagementGroup(RaftPartitionGroup.builder("system")
+    .withNumPartitions(1)
+    .withMembers("member-1", "member-2", "member-3")
+    .build())
+  .withPartitionGroups(
+    PrimaryBackupPartitionGroup.builder("data")
+      .withNumPartitions(32)
+      .build())
+  .build();
+----
+
+==== 主备(Primary-Backup)分区组
+
+即使使用了分片（sharding），raft分区组在扩展性上也是有限的。写进raft分区的操作在成功之前必须被同步复制到集群的大多数节点，并且被刷到硬盘上持久化。
+
+主备分区组是一个相较raft分区组而言更有效率的替换项。主备复制会选举一个主节点，并通过这个主节点来复制写操作。主节点会基于原生组件(primitives)的配置执行复制到n个备用节点。
+
+主备分区完全在内存中进行管理，并提供选项选择同步复制还是异步复制。
+
+主备分区的可靠性只跟系统管理组使用协议的可靠性相同。使用raft管理组以达到最强的一致性和可靠性保障。使用PrimaryBackupPartitionGroup builder来配置主备分区：
+
+[source, java]
+----
+PartitionGroup primaryBackupGroup = PrimaryBackupPartitionGroup.builder("data")
+  .withNumPartitions(32)
+  .build();
+----
+
+主备分组的配置很简单，大部分主备复制协议的特征都在每个原生组件配置的原生组件协议中提供。然而有一个特征对于主备分区非常重要，那就是成员组（member group），其为主备分区提供了zone/rack/host的感知。
+
+==== 外观(Profiles)
+
+对于新学者来说，配置管理组和原生组件分区组可能会很令人生厌。像先前文档中建议的那样，大部分集群配置其实都适用于几种类型：
+
+* Consensus
+* Consensus-based data grid
+* Eventually consistent data grid
+* Client
+
+atomix对于通用的分区配置提供了一种称之为外观(Profiles)的抽象。外观是为特定的应用场景配置atomix实例的命名对象：
+
+[source, java]
+----
+Atomix atomix = Atomix.builder()
+  .withLocalMember("member-1")
+  .withMembers(members)
+  .withProfiles(Profile.CONSENSUS, Profile.DATA_GRID)
+  .build();
+----
+
+内置的外观如下：
+
+* CONSENSUS - creates a Raft system management group and a Raft primitive group named raft both replicated on all initially configured named members
+
+* DATA_GRID - creates a primary-backup system management group if no group already exists, and a primary-backup primitive group named data
+
+* CLIENT - placeholder profile that does not configure any management or primitive groups
+
+外观会按照定义顺序依次对Atomix实例进行配置。这就允许，例如，DATA_GRID外观可以基于raft或不基于raft来配置主备分区，这依赖于之前定义的外观。如此一来，当我们把Profile.CONSENSUS和Profile.DATA_GRID连起来使用时，我们得到一个基于raft的主备分区数据组。
+
+=== 成员组(member groups)
+
+主备分区组在集群的多个成员之上散布其分区。然而，如果一个分区中数据的多个副本放在相同的rack或host上，那么单个失败可能导致数据的丢失。将数据在物理设备上分发以避免灾难性失败导致数据丢失就势在必行。atomix提供成员组来解决这个问题。
+
+为了配置zone/rack/host感知，集群成员必须首先配置他们物理位置的信息。Member builder支持如下的位置信息：
+
+* zone - a String zone
+* rack - a String rack
+* host - a String host name, useful when deploying Atomix nodes in containers
+
+[source, java]
+----
+Atomix.Builder builder = Atomix.builder()
+  .withLocalMember(Member.builder("member-4")
+    .withAddress("localhost:5004")
+    .withRack("rack-1")
+    .build())
+  .withMembers(
+      Member.builder("member-1")
+        .withAddress("localhost:5001")
+        .withRack("rack-1")
+        .build(),
+      Member.builder("member-2")
+        .withAddress("localhost:5002")
+        .withRack("rack-2")
+        .build(),
+      Member.builder("member-3")
+        .withAddress("localhost:5003")
+        .withRack("rack-2")
+        .build());
+----
+
+除了配置成员的属性，PrimaryBackupPartitionGroup需要使用一个MemberGroupStrategy来配置zone/rack/host感知：
+
+[source, java]
+----
+builder.addPartitionGroup(PrimaryBackupPartitionGroup.builder("data")
+  .withPartitions(32)
+  .withMemberGroupStrategy(MemberGroupStrategy.RACK_AWARE)
+  .build());
+----
+
+当使用RACK_AWARE策略时，一个特定分区的主节点和备节点将会跨越配置的不同racks。例如如果同一个分区的主节点在rack1上，那么下一个备节点肯定在rack2上。
+
+MemberGroupStrategy提供的可用策略如下：
+
+* ZONE_AWARE - groups members by the zone() attribute
+* RACK_AWARE - groups members by the rack() attribute
+* HOST_AWARE - groups members by the host() attribute
+* NODE_AWARE - groups members by MemberId
+
+默认是通过MemberId分组，也就是每个成员都是单独一组。
+
+=== 集群成员管理
+
+atomix提供了组成员管理api，允许用户访问集群中成员的信息以及它们的可用性。集群成员可以通过Atomix或AtomixCluster暴露的服务来访问。
+
+通过ClusterMembershipService来访问集群的成员：
+
+[source, java]
+----
+Atomix atomix = Atomix.builder()
+  ...
+  .build();
+
+atomix.start().join();
+
+Collection<Member> members = atomix.getMembershipService().getMembers();
+----
+
+[source, java]
+----
+Member fooMember = atomix.getMembershipService().getMember("foo");
+----
+
+Atomix实例必须start才能访问集群成员。每一个成员只有两种状态：ACTIVE和INACTIVE。查看成员状态：
+
+[source, java]
+----
+Member.State fooState = atomix.getMembershipService().getMember("foo").getState();
+----
+
+集群中的每一个成员可以通过metadata进行复制，当要分享某一个节点的额外的属性时非常有用。metadata是一个简单的Map<String, String>，其变化被监控着：
+
+[source, java]
+----
+atomix.getMembershipService().getLocalMember().metadata().put("foo", "bar");
+----
+
+注意只有local member对metadata做出的更改才会被复制到其他节点。
+
+==== 监听成员变化
+
+用户可以对集群成员变化或成员状态变化做出反应。给ClusterMembershipService注册一个监听器以监听集群成员变化：
+
+[source, java]
+----
+atomix.getMembershipService().addListener(event -> {
+  switch (event.type()) {
+    ...
   }
-  // 同步调用
-  map.putIfAbsent("key", "value").join();
-  //异步调用
-  map.containsKey("key").thenAccept(containsKey -> {
-      if (containsKey) {
-          map.get("key").thenAccept(System.out::println);
-      } else {
-          //do others
-      }
-  });
-  map.putIfAbsent("key", "value").thenRun(()->{
-      System.out.println("success");
-  });
+});
+----
+
+当一个成员加入或离开集群，或者检测到节点失效时，一个事件被触发，然后所有注册的监听器都会被通知以一个ClusterMembershipEvent事件。事件的 type()方法指出哪个成员发生了什么类型的改变：
+
+* MEMBER_ADDED indicates that a new member joined the cluster
+* MEMBER_UPDATED indicates that the member’s metadata was updated
+* MEMBER_REMOVED indicates that a member left the cluster, either explicitly or via failure detection
+
+== 原生组件(primitives)
+
+=== 概览
+
+分布式原生组件是基于Atomix的分布式系统中用于保存/复制数据和同步状态的高级别对象。它们被设计出来以解决各种常见的分布式系统的挑战，使用简单的api以允许低进入门槛。
+
+大体来说，有两种类型的分布式原生组件：
+
+* Data primitives - simple data structures for replicating state
+** AtomicValue
+** AtomicCounter
+** AtomicMap
+** AtomicMultimap
+** DistributedSet
+** DistributedMap
+** etc
+
+* Coordination primitives - objects for coordinating state changes across nodes LeaderElection
+** DistributedLock
+** DistributedSemaphore
+** WorkQueue
+** etc
+
+在低层次上，分布式原生组件模仿可复制状态机，底层由一些不同的复制协议支撑。原生组件可以根据他们的使用场景配置不同的一致性级别、容错、复制份数等。另外，原生组件也可以通过atomix代理的rest api访问。
 
 
-### 利用Atomix自定义资源
-Atomix的自定义资源，其实是基于Copycat状态机，其本质依然是raft状态机的实现。为了演示需要，我们这里定义一个只有increaseAndGet方法的long资源。
+==== 构建分布式原生组件
 
-首先我们需要定义一个资源对象：
+分布式原生组件可以通过很多途径构建。使用builders是最常用的使用 Java API的方式。注意，当使用原生组件builders时，必须提供一个原生组件协议(primitive protocol)：
 
-  @ResourceTypeInfo(id = 12, factory = MyResourceFactory.class)
-  public class MyResource extends AbstractDistributedValue<DistributedLong, Long> {
-    protected MyResource(CopycatClient client, Properties options) {
-      super(client, options);
-    }
-    // 对外提供的方法
-    public CompletableFuture<Long> incrementAndGet() {
-      return client.submit(new MyResourceResolver.IncrementAndGet());
-    }
+[source, java]
+----
+AtomicMap<String, String> map = atomix.atomicMapBuilder("my-map")
+  .withProtocol(MultiPrimaryProtocol.builder("data")
+  ...... )
+  .withNullValues()
+  .withCacheEnabled()
+  .withCacheSize(100)
+  .build();
+----
+
+除了原生组件builders，多例原生组件实例还可以通过Atomix实例的getter方法获得：
+
+[source, java]
+----
+AtomicMap<String, String> map = atomix.getAtomicMap("my-map");
+----
+
+当通过getter方式获得多例原生组件时，在一个节点实例上第一次调用getter时会创建该原生组件实例。
+
+注意通过这种方式创建的原生组件需要在构建Atomix实例时在Atomix实例中配置。
+
+==== 同步和异步原生组件
+
+所有分布式原生组件都提供同步api和异步api。Builders和getters总是会返回同步（阻塞式）的api，例如AtomicMap，底层是通过相应的异步版本支撑的，例如AsyncAtomicMap，该异步api可通过在同步api上调用async()方法获得：
+
+[source, java]
+----
+AsyncAtomicMap<String, String> map = atomix.atomicMapBuilder("my-map")
+  .withNullValues()
+  .withCacheEnabled()
+  .withCacheSize(100)
+  .build()
+  .async();
+----
+
+异步调用接口使用CompletableFutures来保证方法返回之后的回调。
+
+=== 原生组件协议(primitive protocols)
+
+分布式原生组件被设计为分区的抽象可复制状态机。当一个原生组件构建出来时，它可以被映射到一个特定的分区组，并配置与该组相一致的一个协议。协议的配置定义了在选定的分区组实现的协议下该原生组件的行为，例如，考虑到一致性模型、通信模式、超时和重试次数。
+
+例如，为了配置一个运行在raft一致性协议下的分布式锁，一个集群首先要配置一个raft分区组，然后该锁需要配置一个MultiRaftProtocol协议。这会指示Atomix在指定的raft分区组上使用给定的multi-Raft协议复制该锁。
+
+==== MultiRaftProtocol
+
+MultiRaftProtocol是raft分区组要求的协议，要想使用raft一致性协议复制一个原生组件，集群需要首先配置一个raft分区组：
+
+[source, json]
+----
+cluster {
+  local-member {
+    id: member-1
   }
+  members.1 {
+    id: member-1
+    address: "localhost:5001"
+  }
+  members.2 {
+    id: member-2
+    address: "localhost:5002"
+  }
+  members.3 {
+    id: member-3
+    address: "localhost:5003"
+  }
+}
 
-然后定义资源工厂：
+management-group {
+  type: raft
+  name: system
+  partitions: 1
+  members: [member-1, member-2, member-3]
+}
 
-    public class MyResourceFactory implements ResourceFactory<MyResource> {
-        @Overridepublic
-        SerializableTypeResolver createSerializableTypeResolver() {
-            return new MyResourceResolver();
-        }
-        @Overridepublic
-        ResourceStateMachine createStateMachine(Properties properties) {
-            return new MyStateMachine(properties);
-        }
-        @Overridepublic
-        MyResource createInstance(CopycatClient copycatClient, Properties properties) {
-            return new MyResource(copycatClient, properties);
-        }
-    }
+partition-groups.raft {
+  type: raft
+  partitions: 7
+  members: [member-1, member-2, member-3]
+}
+----
 
-在定义资源解析器，也就是状态机的操作：
+如果要创建一个在名称为"raft"的raft分区组上复制的原生组件，需要构建一个MultiRaftProtocol配置指明raft分区组的名称。如果集群中只配置了一个raft分区组，那么可以省略指定分区组的名字：
 
+[source, java]
+----
+Atomix atomix = new Atomix("my.conf");
+atomix.start().join();
 
-    public class MyResourceResolver implements SerializableTypeResolver {
-        public static class IncrementAndGet extends LongCommand<Long> {
-        }
-        @Override
-        public void resolve(SerializerRegistry registry) {
-            registry.register(LongCommands.IncrementAndGet.class, -115);
-        }
-    }
+DistributedLock lock = atomix.lockBuilder("my-lock")
+  .withProtocol(MultiRaftProtocol.builder("raft")
+    .withReadConsistency(ReadConsistency.LINEARIZABLE)
+    .withCommunicationStrategy(CommunicationStrategy.LEADER)
+    .build())
+  .build();
+----
 
-最后再定义资源状态机：
+==== MultiPrimaryProtocol
 
-    public class MyStateMachine extends ResourceStateMachine {
-        long value;
-        protected MyStateMachine(Properties config) {
-            super(config);
-        }
-        public long incrementAndGet(Commit<IncrementAndGet> commit) {
-            try {
-                Long oldValue = value;
-                value = oldValue + 1;
-                return value;
-            } finally {
-                commit.close();
-            }
-        }
-    }
+MultiPrimaryProtocol用于配置原生组件在主备分区组上进行复制。 Multi-primary协议是为高扩展性和高可用性设计的。用户可以配置在每一个分区中备份的个数以及是同步还是异步进行复制。
 
-然后在创建AtomixReplica的时候，加入资源类型，以使框架能够识别该类资源：
+要使用multi-primary原生组件，集群需要首先配置一个主备分区组：
 
-    return AtomixReplica.builder(address)
-        .withTransport(new NettyTransport())
-        .withStorage(new Storage(storage))
-        .addResourceType(MyResource .class)
-        .build();
+[source, json]
+----
+cluster {
+  local-member {
+    id: member-1
+  }
+  members.1 {
+    id: member-1
+    address: "localhost:5001"
+  }
+  members.2 {
+    id: member-2
+    address: "localhost:5002"
+  }
+  members.3 {
+    id: member-3
+    address: "localhost:5003"
+  }
+}
 
-## Atomix常用配置
+management-group {
+  type: raft
+  name: system
+  partitions: 1
+  members: [member-1, member-2, member-3]
+}
 
+partition-groups.data {
+  type: primary-backup
+  partitions: 32
+}
+----
 
-|===
-|配置项	|默认值	|说明
-|raft.electionTimeout	|500ms	|选举超时时间
-|raft.heartbeatInterval	|250ms	|心跳检测周期
-|raft.sessionTimeout	|5s	|客户端回话超时时间
-|server.transport	|NettyTransport	|一般都用netty
-|server.transport.connectTimeout	|5s	|连接超时时间
-|server.transport.reuseAddress	|true	|SO_REUSEADDR
-|server.transport.tcpKeepAlive	|true	|SO_KEEPALIVE
-|server.transport.tcpNoDelay	|false	|TCP_NODELAY
-|server.transport.acceptBacklog	|1024	|全连接队列
-|storage.level	|DISK	|存储级别，MEMORY,MAPPED,DISK
-|storage.directory	|user.dir	|log 存储日志目录。
-|storage.maxSegmentSize	|32M	|最大段长度，每段一个文件
-|storage.maxEntriesPerSegment	|1M	|每段多少个log entry
-|storage.compaction.threads	|2	|日志压缩线程数
-|storage.compaction.minor	|1m	|minor压缩的预估间隔，并不一定执行minor压缩
-|storage.compaction.major	|1h	|major压缩的预估间隔，并不一定执行major压缩
-|===
+然后使用MultiPrimaryProtocol来配置一个multi-primary-based原生组件，给builder方法传递主备分区组的名字：
 
-## 一致性和容错性
+[source, java]
+----
+Atomix atomix = new Atomix("my.conf");
+atomix.start().join();
 
-   Atomix用于任务关键型小规模数据集，其一致性是一个比可用性更大的关注点。
+AtomicMap<String, String> map = atomix.<String, String>atomicMapBuilder("my-map")
+  .withProtocol(MultiPrimaryProtocol.builder("data")
+    .withNumBackups(2)
+    .withReplication(Replication.ASYNCHRONOUS)
+    .build())
+  .build();
+----
 
-   它通过读取和写入的线性化提供强大的可配置一致性。在线性化中，一旦提交了写入，所有客户端都可以保证知道结果状态。
+==== 协议分区器(Protocol Partitioners)
 
-   Atomix集群的一致性由基础Raft一致性算法保证，其中当选的领导者将拥有之前成功的所有写入。
+很多分布式原生组件在配置的分区组中的所有分区上进行分区。例如，当往一个AtomicMap中放置一个key/value时，该key通过一个配置的分区器被映射到某一个分区上。这允许了集群通过在多个分区上展开数据来实现扩展性。
 
-   所有新写入都将通过群集负责人，并在完成之前同步复制到大多数服务器。
+对于被分区的原生组件，大部分原生组件的实现通过将key编码为字符串然后使用默认的Murmur 3哈希算法将其映射到一个分区上。用户可以在协议配置中提供一个定制的分区器来改变该默认行为：
 
-   为了保持容错，群集的大多数服务器需要处于活动状态。如果少数节点发生故障，节点将被标记为非活动状态，并将被被动节点或备​​用节点替换。
+[source, java]
+----
+AtomicMap<String, String> map = atomix.<String, String>atomicMapBuilder("my-map")
+  .withProtocol(MultiPrimaryProtocol.builder()
+    .withPartitioner((key, partitions) -> partitions.get(Math.abs(key.hashCode() % partitions.size())))
+    .withNumBackups(2)
+    .build())
+  .build();
+----
 
-   如果领导者失败，群集中的其余服务器将开始新的领导者选举。同时，群集将不可用。
+==== 逆熵(Anti-entropy) Protocol
 
-   在分区的情况下，如果领导者位于分区的非仲裁方面，则它会降级，并且在具有法定人数的一方中选出新的领导者。
+逆熵协议是一种gossip协议，使用后台进程检测各端点丢失的变化。gossip协议被设计用来实现高吞吐量的最终一致性。
 
-   而且，如果领导者占多数，那么它将继续没有变化。解析分区后，非仲裁端的节点将加入仲裁并相应地更新其日志。
+为了使用逆熵协议，需要引入atomix-gossip jar包：
+
+[source, xml]
+----
+<dependency>
+  <groupId>io.atomix</groupId>
+  <artifactId>atomix-gossip</artifactId>
+</dependency>
+----
+
+逆熵协议只能在其实现支持的原生组件上定义，当前包括：
+
+* DistribuetedCounter
+* DistributedValue
+* DistributedMap
+* DistributedSet
+* DistributedSortedSet
+* DistributedNavigableSet
+
+使用AntiEntropyProtocolBuilder来配置一个原生组件使用逆熵协议。
+
+[source, java]
+----
+DistributedMap<String, String> map = atomix.<String, String>mapBuilder("my-map")
+  .withProtocol(AntiEntropyProtocol.builder()
+    .withTimestampProvider(() -> new WallClockTimestamp())
+    .build())
+  .withCacheEnabled()
+  .build();
+----
+
+该协议可以依据一致性要求和性能表现进行调整。该协议配置中最重要的组件是TimestampProvider，逆熵协议根据时间戳对变化进行排序，因此时间戳提供器对一致性是至关重要的。
+
+==== CRDT Protocol
+
+无冲突复制数据类型Conflict-free replicated data types (CRDT)是特殊的数据结构类型，可保证强最终一致性。CrdtProtocol为特定的原生组件实现了CRDTs：
+
+* DistributedCounter
+* DistributedValue
+* DistributedSet
+* DistributedSortedSet
+* DistributedNavigableSet
+
+使用CrdtProtocol Builder来配置一个原生组件使用基于CRDT的协议：
+
+[source, java]
+----
+DistributedCounter counter = atomix.counterBuilder("my-counter")
+  .withProtocol(CrdtProtocol.builder().build())
+  .build();
+----
+
+=== AtomicCounter
+
+AtomicCounter原生组件是一个Java AtomicLong的分布式实现。使用AtomicCounterBuilder来配置一个AtomicCounter：
+
+[source, java]
+----
+AtomicCounterBuilder counterBuilder = atomix.atomicCounterBuilder("my-counter");
+----
+
+AtomicCounter可以指定一个原生组件协议来复制其变化。AtomicCounter是一个一致的原生组件，因此只能使用MultiRaftProtocol或MultiPrimaryProtocol。
+
+另外，当使用了分区的协议时，为了一致性，该计数器counter只会在一个分区上进行复制：
+
+[source, java]
+----
+AtomicCounter counter = atomix.atomicCounterBuilder("my-counter")
+  .withProtocol(MultiRaftProtocol.builder()
+    .withReadConsistency(ReadConsistency.LINEARIZABLE)
+    .build())
+  .build();
+----
+
+使用atomix.getAtomicCounter("my-counter")来获得一个已经配置的counter：
+
+[source, java]
+----
+AtomicCounter counter = atomix.getAtomicCounter("my-counter");
+----
+
+所有在AtomicCounter上的操作都被保证为原子的。除了原子性保证，其读写操作的一致性保证是通过配置的协议来保证的：
+
+[source, java]
+----
+AtomicCounter counter = atomix.atomicCounterBuilder("my-counter")
+  .withProtocol(MultiRaftProtocol.builder()
+    .withReadConsistency(ReadConsistency.LINEARIZABLE)
+    .build())
+  .build();
+
+long value = counter.incrementAndGet();
+if (counter.compareAndSet(value, 1)) {
+  ...
+}
+----
+
+像所有的Atomix原生组件一样，counter接口的异步相似物-AsyncAtomicCounter-可以通过调用 async()方法得到：
+
+[source, java]
+----
+AsyncAtomicCounter asyncCounter = counter.async();
+
+asyncCounter.incrementAndGet().thenAccept(value -> {
+  asyncCounter.compareAndSet(value, 1).thenAccept(() -> {
+    ...
+  });
+});
+----
+
+异步接口使用CompletableFutures以在操作完成的时候通知客户端。所有Atomix协议的线程模型都能保证同一个线程中的CompletableFuture回调总会被执行，除非该线程被一个前面执行的操作给阻塞了。
+
+另外CompletableFutures会以程序编写的顺序完成。换句话说，如果在客户端操作A在操作B之前执行，那么操作A的future一定比操作B的future早完成。
+
+当使用一个counter的时候，Atomix为了管理该counter可能会消耗一些网络、内存、磁盘资源。为了释放这些资源，用户应该使用close()来允许Atomix垃圾回收该实例。
+
+[source, java]
+----
+counter.close();
+----
+
+=== DistributedCounter
+
+DistributedCounter原生组件是一个分布式计数器，与Java AtomicLong的api非常相似。然而，DistributedCounter与AtomicCounter不同的是它不提供强一致性保证，因此可以支持最终一致性协议，尤其是通过CRDT计数器的gossip协议。
+
+分布式计数器可以通过DistributedCounterBuilder来编程式的配置，为了创建一个新的计数器，使用counterBuilder方法，把计数器的名称作为参数传递进去：
+
+[source, java]
+----
+DistributedCounterBuilder counterBuilder = atomix.counterBuilder("my-counter");
+----
+
+计算器可以配置原生组件协议来对变更进行复制，分布式计数器并不被认为是一个一致的原生组件，因此可以支持强一致和最终一致的协议：
+
+* MultiRaftProtocol
+* MultiPrimaryProtocol
+* CrdtProtocol
+
+另外，当使用了分区的协议时，为了一致性，该计数器counter只会在一个分区上进行复制：
+
+[source, java]
+----
+DistributedCounter counter = atomix.counterBuilder("my-counter")
+  .withProtocol(CrdtCounter.instance())
+  .build();
+----
+
+使用atomix.getCounter("my-counter")来获得一个已经配置的DistributedCounter：
+
+[source, java]
+----
+DistributedCounter counter = atomix.getCounter("my-counter");
+----
+
+DistributedCounter支持几乎所有的Java core AtomicLong的操作。counter的一致性保障完全取决于其配置的一致性协议。DistributedCounter接口本身不提供任何保证：
+
+[source, java]
+----
+DistributedCounter counter = atomix.counterBuilder("my-counter")
+  .withProtocol(CrdtCounter.instance())
+  .build();
+
+long oldValue = counter.incrementAndGet();
+long newValue = counter.addAndGet(10);
+----
+
+像所有的Atomix原生组件一样，counter接口的异步相似物-AsyncDistributedCounter-可以通过调用 async()方法得到：
+
+[source, java]
+----
+AsyncDistributedCounter asyncCounter = counter.async();
+
+asyncCounter.incrementAndGet().thenAccept(oldValue -> {
+  asyncCounter.addAndGet(10).thenAccept(newValue -> {
+    ...
+  });
+});
+----
+
+异步接口使用CompletableFutures以在操作完成的时候通知客户端。所有Atomix协议的线程模型都能保证同一个线程中的CompletableFuture回调总会被执行，除非该线程被一个前面执行的操作给阻塞了。
+
+另外CompletableFutures会以程序编写的顺序完成。换句话说，如果在客户端操作A在操作B之前执行，那么操作A的future一定比操作B的future早完成。
+
+当使用一个counter的时候，Atomix为了管理该counter可能会消耗一些网络、内存、磁盘资源。为了释放这些资源，用户应该使用close()来允许Atomix垃圾回收该实例。
+
+[source, java]
+----
+counter.close();
+----
+
+=== AtomixCounterMap
+
+=== AtomixDocumentTree
+
+=== AtomixIdGenerator
+
+=== AtomixLock
+
+=== AtomixMap
+
+=== AtomixMultiMap
+
+=== AtomixValue
+
+=== ......
+
+=== DistributedCyclicBarrier
+
+=== DistributedList
+
+=== DistributedLock
+
+=== DistributedMap
+
+=== DistributedValue
+
+=== ......
+
+=== LeaderElection
+
+=== WorkQueue
+
+=== ......

@@ -1,4 +1,4 @@
-= atomxi 启动项设置
+= atomix 启动项设置
 
 ## 构建atomix单点启动步骤：
 
