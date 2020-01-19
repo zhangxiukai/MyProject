@@ -1,0 +1,249 @@
+## 简介
+
+  atomix是一个故障容忍分布式协调框架，用于实现分布式资源的容错和一致性。
+  主要是启动多台服务器，但是只有一台主服务器在工作，其他服务器在进行备份。
+  若主服务器挂掉，则通过一定的算法选出新的服务器代替原来的主服务器进行工作。
+  只有集群启动的节点数在集群配置的数量一半之上整个集群才能够正常的进行工作。
+
+## 实现步骤
+
+### 启动服务前配置
+
+  在启动nginx服务的时候，判断是否是以高可用的模式启动的。
+  如果是以高可用模式启动的，则向启动项参数里添加几个配置项：包括：
+    （1）高可用集群的列表信息
+    （2）当前节点在集群中的唯一标识
+    （3）当前节点在集群中的启动端口号
+    （4）当前节点在项目中的主机地址
+    （5）当前节点在项目中的页面端口号
+
+### 启动页面前配置
+
+   在启动nginx服务之后，系统会启动springboot服务，在启动springboot服务之前，判断是否是以高可用模式启动项目。
+
+   若以高可用模式启动项目，则会进行高可用集群节点的配置。 此配置会读取之前的配置项，将配置的集群列表信息进行一定的处理，并且进行变量的赋值。
+   然后启动atomix集群服务:
+   设置atomix集群启动最大失败重试次数为5次,每次启动失败后线程sleep 5秒.
+   可以根据启动项设置是否清除之前的日志信息.
+   若选择清除历史日志,则遍历日志文件,将其删除.然后去build atomix服务信息.
+
+#### build  atomix服务信息
+
+
+  private static Atomix buildAtomix(String memberId, String host, int memPort, List<Triple<String, String, Integer>> memberTriples) {
+          // 获取每个集群节点的具体信息
+          Collection<Node> bootstrapLocations =
+              memberTriples.stream()
+                  .map(memTriple -> Node.builder().withId(memTriple.getLeft())
+                      .withAddress(Address.from(memTriple.getMiddle(), Integer.valueOf(memTriple.getRight())))
+                      .build())
+                  .collect(Collectors.toList());
+          // 获取集群成员列表
+          Collection<String> members =
+              memberTriples.stream()
+                  .map(memTriple -> memTriple.getLeft())
+                  .collect(Collectors.toList());
+          // build atomix 集群
+          return Atomix.builder()
+              .withClusterId(CLUSTER_NAME)  //集群名称
+              .withMemberId(memberId)   // 当前节点在集群中的标识,例如:server1
+              .withHost(host)   // 当前节点的主机地址,例如:localhost
+              .withPort(memPort)    // 当前节点在集群中的端口号,例如:6001
+              .withMulticastEnabled()   // 是否开启多播,默认开启
+              .withMembershipProvider(BootstrapDiscoveryProvider.builder().withNodes(bootstrapLocations).build())   //成员通信provider
+              .withManagementGroup(
+                  RaftPartitionGroup.builder(MANAGER_GROUP_NAME)  // 管理组名称
+                      .withNumPartitions(1)   // 管理组分区数
+                      .withDataDirectory(new File("." + memberId + "/" + MANAGER_GROUP_NAME)) // 数据路径
+                      .withMembers(members) // 成员信息
+                      .build()
+              )   // 配置系统管理组
+              .addPartitionGroup(
+                  RaftPartitionGroup.builder(PARTITION_GROUP_NAME)  // 分区组名称
+                      .withNumPartitions(1)   // 分区组分区数
+                      .withDataDirectory(new File("." + memberId + "/" + PARTITION_GROUP_NAME))  // 分区组路径
+                      .withMembers(members)   // 分区组成员信息
+                      .build()
+              )   // 配置系统分片组
+              .build();
+      }
+
+
+
+### 启动atomix服务
+
+  atomix集群build完成之后,便会新启动一个线程去启动atomix服务.
+  启动atomix服务时,会根据当前节点是否是服务中的主节点去执行对应的启动服务.
+
+
+    public void run() {
+        // 初始化一个atomix value用来判断当前节点是主节点还是从节点
+        AsyncAtomicValue<String> vv = server.getPrimitivesService() // 构建一个 String类型的 atomix value
+            .<String>atomicValueBuilder(ClusterUtils.CLUSTER_STATUS_PRIMITIVE_NAME) // 设置原生主件的唯一标识
+            .withProtocol(MultiRaftProtocol.builder(ClusterUtils.PARTITION_GROUP_NAME) //用于构建新AtomicValue实例的生成器. 此处构建的为MultiRaftProtocol，并设置MultiRaftProtocol作用的分区组标识
+                .withReadConsistency(ReadConsistency.LINEARIZABLE)  //设置读取一致性级别
+                .withRecoveryStrategy(Recovery.CLOSE) //设置恢复策略
+                .withCommunicationStrategy(CommunicationStrategy.FOLLOWERS)  //制定沟通策略
+                .build())   // 构建分布式原生组件
+            .build().async();
+        int errorIndex = 0;  // 定义选举失败次数
+        while (this.server.isRunning() && ClusterUtils.atomixFlag) {
+            try {
+                Thread.sleep(sleepTimeInteval); // 线程每隔多长时间去执行一次主备节点判断,主节点2秒,备节点10秒
+                if (!this.server.isRunning() || !ClusterUtils.atomixFlag) {
+                    continue;
+                }
+                String res = vv.get().get(60, TimeUnit.SECONDS);  // 通过atomix value得到的值去判断是否为主节点
+                String[] idAndTime = res == null ? new String[]{"noserver", "0"} : res.split("\\|");  //若首次进入，得到的是空值，为其设置默认值
+                String sid = idAndTime[0];  //获取serverId
+                currentServer = sid;
+                long ts = Long.valueOf(idAndTime[1]);   //获取上次进入时得时间
+                LOG.info("-------------------------: " + ts + "--" + sid);
+                // 若当前节点id与获取出来的id相同，并且当前时间减去上次进入时间小于从节点睡眠时间，则说明当前主节点心跳可用，依然为主节点
+                if (serverId.equals(sid) && System.currentTimeMillis() - ts < ClusterUtils.VISIT_INTERVAL_BACKUP) {         //说明自己本身就是主服务器
+                    long currentTime = System.currentTimeMillis();  //获取当前时间
+                    String mess = serverId + "|" + currentTime;
+                    if (vv.compareAndSet(res, mess).exceptionally(ex -> {   // 通过此方法将新创建的值与上一次的值做对比并且重新设值
+                        LOG.error("----------------value compare and set error: {}", ex.getMessage());
+                        return false;
+                    }).get(60, TimeUnit.SECONDS)) {
+                        LOG.info("---------------------------main server set status success!");
+                        sleepTimeInteval = ClusterUtils.VISIT_INTERVAL_PRIMARY;     //将休眠时间设置为较短的心跳时间
+                        ClusterConf.setMainFlag(true, currentTime);     //手动标识当前节点为主节点
+                    }
+                } else {
+                    // 若当前节点id与获取出来的id不相同，但当前节点等于主节点睡眠时间，则说明由于某些原因导致该节点从主节点被将为从节点，但是心跳时间没来得及从新设置
+                    if (sleepTimeInteval == ClusterUtils.VISIT_INTERVAL_PRIMARY) {    //说明由于某些特殊原因（最大可能是服务器重启时间过长），
+                        sleepTimeInteval = ClusterUtils.VISIT_INTERVAL_BACKUP;    //导致了两个server都认为自己是主服务器而激活，发现该情况的server首先退回
+                        ClusterConf.setMainFlag(false, System.currentTimeMillis());     //手动标记为从节点
+                    }
+                    if (System.currentTimeMillis() - ts > sleepTimeInteval) {   //说明本服务器是从服务器，并且主服务器八成挂了
+                        long currentTime = System.currentTimeMillis();
+                        String mess = serverId + "|" + currentTime;
+                        if (vv.compareAndSet(res, mess).exceptionally(ex -> {
+                            LOG.error("----------------value compare and set error: {}", ex.getMessage());
+                            return false;
+                        }).get(60, TimeUnit.SECONDS)) {
+                            sleepTimeInteval = ClusterUtils.VISIT_INTERVAL_PRIMARY;
+                            LOG.info("2 set current sleepTimeInteval 2S");
+                            LOG.info("=================异步执行服务器restart");
+                            // 标记为主服务器
+                            AtomixFlag.clusterFlag = true;
+                            // 初始化调度
+                            serverRunner.scheduler.init();
+                            serverRunner.report.init();
+                            serverRunner.carpo.prepareBuildinSteps();
+                        } else {            //否则，说明本服务器是从服务器，且尚未断定主服务器挂了
+                            LOG.info("=========未提升为主服务器，继续作为从服务器监听中");
+                            sleepTimeInteval = ClusterUtils.VISIT_INTERVAL_BACKUP;
+                        }
+                    } else {
+                        LOG.info("=========从服务器监听中");
+                        sleepTimeInteval = ClusterUtils.VISIT_INTERVAL_BACKUP;
+                    }
+                }
+                errorIndex = 0;
+            } catch (Exception e) {
+                errorIndex++;
+                try {
+                    Thread.sleep(errorIndex * 1000);
+                } catch (Exception ex) {
+                    // do nothing
+                }
+                LOG.error("===========================在atomix node监听集群状态时报错:{}", e.getMessage(), e);
+                if (errorIndex > 5) {
+                    LOG.error("---------------------atomix node连续5次监听集群失败{}，需要重新获得primitive value", this.serverId);
+                    try {
+                        vv.close().join();
+                    } catch (Exception ex) {
+                        // do nothing
+                    }
+                    // 重新获得primitive value
+                    vv = server.getPrimitivesService().<String>atomicValueBuilder(ClusterUtils.CLUSTER_STATUS_PRIMITIVE_NAME)
+                        .withProtocol(MultiRaftProtocol.builder(ClusterUtils.PARTITION_GROUP_NAME)
+                            .withReadConsistency(ReadConsistency.LINEARIZABLE)
+                            .withRecoveryStrategy(Recovery.CLOSE)
+                            .withCommunicationStrategy(CommunicationStrategy.LEADER)
+                            .build())
+                        .build().async();
+                    errorIndex = 0;
+                }
+            }
+        }
+        if (vv != null) {
+            try {
+                vv.close().join();
+            } catch (Exception e) {
+                // do nothing
+            }
+        }
+        if (server != null) {
+            try {
+                server.stop().join();
+            } catch (Exception e) {
+                LOG.error("-------------atomix node关闭出错:{}", e.getMessage(), e);
+            }
+        }
+        atomixStopSignal.countDown();
+        LOG.info("---------------------atomix node关闭！{}", this.serverId);
+    }
+
+
+执行完成之后atomix服务便已经启动成功.
+
+### 前端页面查询
+
+  在用户登录之后会前端进行一次查询,若查询结果是以高可用方式启动,则服务器前端会每10秒发送一次请求,去获取当前的主服务器;
+  若获取到的主服务器与当前页面的服务器主机和端口不同,则前端页面会自动跳转至主服务器对应的页面登录页上.
+
+
+
+    function getServerUrl() {
+        // 若用户没登录,则返回
+        if (!currentUser.password) {
+            return;
+        }
+        var oldPath = $window.location.href.toString(); // 获取当前页面地址
+        var currentHost = oldPath.substring(7, oldPath.indexOf("/#/"));
+        console.log(currentHost);
+        $http.get('/api/zebra/auth/server').success(function (resp) {
+            var port = resp.port;
+            nodeList = resp.list;
+            // 不是ha模式启动
+            if (port && port === "false") {
+                clearInterval(timer);
+            } else {
+                console.log($window.location.href);
+                // 路径相同，不做处理
+                if (port === currentHost) {
+                    return ;
+                }
+                // 跳转到新的路径
+                var newPath = 'http://' + port + '/#/login';
+                $window.location.assign(newPath);
+            }
+        }).error(function (resp) {  // 获取不到信息,说明服务器挂了
+            var skip = false;
+            auxo.array.forEach(nodeList, function (item) {
+                if (skip === false) {
+                     // 向集群中剩余的节点发送跨域请求,去获取集群的主节点,然后跳转页面
+                    $http.get('http://' + item + '/api/zebra/auth/server').then(function (resp) {
+                        var port = resp.data.port;
+                        if (port && port === "false") {
+                            clearInterval(timer);
+                        } else {
+                            // 路径相同，不做处理
+                            if (port === currentHost) {
+                                return ;
+                            }
+                            var newPath = 'http://' + port + '/#/login';
+                            $window.location.assign(newPath);
+                        }
+                        skip = true;
+                    });
+                }
+            }).error(function () {
+            })
+        })
+    }
+

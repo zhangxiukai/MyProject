@@ -29,6 +29,7 @@
 
 
 1. 第一步   设置系统默认参数
+
     1） 设置默认启动项参数
         a） 转化节点ID /位置的参数类型，格式为id @ host：port。
         b） 转化节点地址格式为host：port的参数类型
@@ -60,10 +61,12 @@
 3. 第三步  为给定名称空间配置并创建一个新的日志服务。
 
 4. 第四步  从给定的名称空间构建一个新的Atomix实例。
+
     1） 从给定的名称空间创建一个Atomix配置。
     2） 开启 shutdown hook.
 
 5. 第五步  启动atomix服务
+
     1） 开始管理者单播服务 (Netty unicast service.)
     2） 开启管理者广播服务 (Netty broadcast service.)
     3） 开启管理者成员服务 (Default )
