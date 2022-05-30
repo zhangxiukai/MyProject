@@ -1,4 +1,4 @@
-## Raft算法背景
+== Raft算法背景
 
 Raft是一种共识算法，旨在替代Paxos。
 它通过逻辑分离比Paxos更容易理解，但它也被正式证明是安全的，并提供了一些额外的功能（维基百科）。
@@ -8,7 +8,7 @@ Raft 有几个关键模块：领导人选举、日志复制和安全性，同时
 Raft 算法还允许集群成员的动态变更，它利用大多数原则来保证安全性。
 
 
-## Raft算法简介
+== Raft算法简介
 Raft协议主要有三种角色：
 
 Leader（领导者）
@@ -24,7 +24,7 @@ image::../image/relation.png[]
 可以看出所有节点启动时都是follower状态；在一段时间内如果没有收到来自leader的心跳，从follower切换到candidate，发起选举；
 如果收到majority的造成票（含自己的一票）则切换到leader状态；如果发现其他节点比自己更新，则主动切换到follower。
 
-### 领导者选举
+=== 领导者选举
 
 领导者选举主要按照如下原则进行。
 
@@ -65,7 +65,7 @@ image::../image/majority.png[]
 因此raft引入了randomized election timeouts来尽量避免平票情况。
 同时，leader-based 共识算法中，节点的数目都是奇数个，尽量保证majority的出现。
 
-### 日志复制
+=== 日志复制
 
 一旦一个领导人被选举出来，他就开始为客户端提供服务，且Raft算法主要靠日志执行。其中日志复制的主要原则如下：
 
@@ -92,7 +92,7 @@ image::../image/logs.png[]
   在上面的流程中，leader只需要日志被复制到大多数节点即可向客户端返回，一旦向客户端返回成功消息，那么系统就必须保证log（其实是log所包含的command）在任何异常的情况下都不会发生回滚。
 这里有两个词：commit（committed），apply(applied)，前者是指日志被复制到了大多数节点后日志的状态；而后者则是节点将日志应用到状态机，真正影响到节点状态。
 
-### 安全性
+=== 安全性
 
 安全性的论证部分主要是通过以下两个前面提到限制规则来保证算法的安全性：
 1. 选举限制
@@ -100,7 +100,7 @@ image::../image/logs.png[]
 
 image::../image/safty.png[]
 
-#### Election safety
+==== Election safety
 
 选举安全性，即任一任期内最多一个leader被选出。 这一点非常重要，在一个复制集中任何时刻只能有一个leader。系统中同时有多余一个leader，被称之为脑裂（brain split），
 这是非常严重的问题，会导致数据的覆盖丢失。在raft中，两点保证了这个属性：
@@ -110,7 +110,7 @@ image::../image/safty.png[]
 
 因此，某一任期内一定只有一个leader。
 
-#### log matching
+==== log matching
 
 log匹配特性， 就是说如果两个节点上的某个log entry的log index相同且term相同，那么在该index之前的所有log entry应该都是相同的。依赖于以下两点
 
@@ -133,7 +133,7 @@ leader、follower都可能crash，那么follower维护的日志与leader相比�
 
 当出现了leader与follower不一致的情况，leader强制follower复制自己的log
 
-leader会维护一个nextIndex[]数组，记录了leader可以发送每一个follower的log index，初始化为eader最后一个log index加1，
+leader会维护一个nextIndex[]数组，记录了leader可以发送每一个follower的log index，初始化为leader最后一个log index加1，
 前面也提到，leader选举成功之后会立即给所有follower发送AppendEntries RPC（不包含任何log entry， 也充当心跳消息）,那么流程总结为：
 
 s1 leader 初始化nextIndex[x]为 leader最后一个log index + 1
@@ -146,7 +146,7 @@ s4 leader收到follower的回复，如果返回值是False，则nextIndex[x] -= 
 
 s5 同步nextIndex[x]后的所有log entries
 
-#### leader completeness vs elcetion restriction
+#### leader completeness vs election restriction
 
 leader完整性：如果一个log entry在某个任期被提交（committed），那么这条日志一定会出现在所有更高term的leader的日志里面。这个跟leader election、log replication都有关。
 
@@ -154,13 +154,13 @@ leader完整性：如果一个log entry在某个任期被提交（committed）�
 
 一个节点得到majority的投票才能成为leader，而节点A给节点B投票的其中一个前提是，B的日志不能比A的日志旧
 
-#### corner case
+==== corner case
 
 raft保证Election safety，即一个任期内最多只有一个leader，但在网络分割（network partition）的情况下，可能会出现两个leader，但两个leader所处的任期是不同的。如下图所示
 
 image::../image/stale_leader.png[]
 
-系统有5个节点ABCDE组成，在term1，Node B是leader，但Node A、B和Node C、D、E之间出现了网络分割，因此Node C、D、E无法收到来自leader（Node B）的消息，
+系统有5个节点A、B、C、D、E组成，在term1，Node B是leader，但Node A、B和Node C、D、E之间出现了网络分割，因此Node C、D、E无法收到来自leader（Node B）的消息，
 在election time之后，Node C、D、E会分期选举，由于满足majority条件，Node E成为了term 2的leader。
 因此，在系统中貌似出现了两个leader：term 1的Node B， term 2的Node E, Node B的term更旧，但由于无法与Majority节点通信，NodeB仍然会认为自己是leader。
 
@@ -174,7 +174,7 @@ image::../image/stale_leader.png[]
 从raft的论文中可以看到，leader转换成follower的条件是收到来自更高term的消息，如果网络分割一直持续，那么stale leader就会一直存在。
 而在raft的一些实现或者raft-like协议中，leader如果收不到majority节点的消息，那么可以自己step down，自行转换到follower状态。
 
-#### State Machine Safety
+==== State Machine Safety
 
 如果节点将某一位置的log entry应用到了状态机，那么其他节点在同一位置不能应用不同的日志。简单点来说，所有节点在同一位置（index in log entries）应该应用同样的日志。但是似乎有某些情况会违背这个原则：
 
@@ -192,9 +192,10 @@ image::../image/state_safety.png[]
 因此，在上图中，不会出现（C）时刻的情况，即term4任期的leader s1不会复制term2的日志到s3。
 而是如同(e)描述的情况，通过复制-提交 term4的日志顺便提交term2的日志。如果term4的日志提交成功，那么term2的日志也一定提交成功，此时即使s1crash，s5也不会重新当选。
 
-### 演示网址
+=== 演示网址
 http://thesecretlivesofdata.com/raft/
 
-### 论文网址
+=== 论文网址
 https://www.cnblogs.com/xybaby/p/10124083.html
+
 https://web.stanford.edu/~ouster/cgi-bin/papers/raft-atc14

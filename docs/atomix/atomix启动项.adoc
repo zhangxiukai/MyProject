@@ -1,6 +1,6 @@
 = atomix 启动项设置
 
-## 构建atomix单点启动步骤：
+== 构建atomix单点启动步骤：
 
   public static void main(String[] args) throws Exception {
     // Parse the command line arguments.
