@@ -1,0 +1,4 @@
+name	kecheng	fensu
+小明	yuwen	89
+张三	shuxue	100
+李四	yingyu	90

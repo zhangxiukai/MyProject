@@ -1,9 +1,10 @@
 package com.demo.reflect;
 
 
+import java.io.Serializable;
 import org.apache.log4j.Logger;
 
-public class Person implements PersonInterface {
+public class Person implements PersonInterface, Serializable {
 
     public static  final   Logger logger = Logger.getLogger(Person.class);
 
